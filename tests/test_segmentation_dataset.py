@@ -36,3 +36,17 @@ def test_segmentation_dataset_and_dataloader_smoke() -> None:
     batch = next(iter(dataloader))
     assert batch["image"].shape == (2, 3, 512, 512)
     assert batch["mask"].shape == (2, 1, 512, 512)
+
+
+def test_segmentation_dataset_strong_augmentation_smoke() -> None:
+    dataset_root = _load_active_dataset_root()
+    transform = get_segmentation_transforms(split="train", image_size=512, aug_profile="strong")
+    dataset = CrackSegDataset(dataset_root=dataset_root, split="train", transform=transform)
+
+    sample = dataset[0]
+    assert sample["image"].shape == (3, 512, 512)
+    assert sample["mask"].shape == (1, 512, 512)
+    assert sample["image"].dtype == torch.float32
+    assert sample["mask"].dtype == torch.float32
+    assert float(sample["mask"].min()) >= 0.0
+    assert float(sample["mask"].max()) <= 1.0

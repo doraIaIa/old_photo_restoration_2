@@ -20,9 +20,13 @@ from torch.utils.data import DataLoader
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 from src.data.dataset import CrackSegDataset
-from src.data.transforms import get_segmentation_transforms
+from src.data.transforms import VALID_AUG_PROFILES, get_segmentation_transforms
 from src.losses.segmentation import bce_dice_loss
 from src.models.segmenter import CrackSegmenter
 from src.utils.metrics import binary_f1, binary_iou, binary_precision, binary_recall
@@ -43,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bce-weight", type=float, default=0.5, help="Trọng số BCE trong loss.")
     parser.add_argument("--dice-weight", type=float, default=0.5, help="Trọng số Dice trong loss.")
     parser.add_argument("--base-channels", type=int, default=8, help="Số channel gốc của U-Net skeleton.")
+    parser.add_argument("--aug-profile", choices=sorted(VALID_AUG_PROFILES), default="baseline", help="Profile augmentation cho train split.")
     parser.add_argument("--patience", type=int, default=8, help="Số epoch chờ cải thiện `val_iou` trước khi early stop.")
     parser.add_argument("--min-delta", type=float, default=5e-4, help="Mức cải thiện tối thiểu của `val_iou` để reset patience.")
     parser.add_argument("--overwrite-run", action="store_true", help="Cho phép ghi đè đúng run_id hiện có.")
@@ -239,12 +244,17 @@ def update_best_runs_md(path: Path, run_id: str, dataset_id: str, best_metrics: 
     path.write_text(content, encoding="utf-8")
 
 
-def build_dataloaders(config: dict[str, Any], batch_size: int, num_workers: int) -> tuple[Path, DataLoader, DataLoader]:
+def build_dataloaders(
+    config: dict[str, Any],
+    batch_size: int,
+    num_workers: int,
+    aug_profile: str,
+) -> tuple[Path, DataLoader, DataLoader]:
     dataset_root = PROJECT_ROOT / config["processed"]["root"] / config["processed"]["active_dataset"]
     image_size = int(config["build"]["image_size"])
 
-    train_transform = get_segmentation_transforms(split="train", image_size=image_size)
-    val_transform = get_segmentation_transforms(split="val", image_size=image_size)
+    train_transform = get_segmentation_transforms(split="train", image_size=image_size, aug_profile=aug_profile)
+    val_transform = get_segmentation_transforms(split="val", image_size=image_size, aug_profile="baseline")
 
     train_dataset = CrackSegDataset(dataset_root=dataset_root, split="train", transform=train_transform)
     val_dataset = CrackSegDataset(dataset_root=dataset_root, split="val", transform=val_transform)
@@ -290,6 +300,7 @@ def make_notes_text(args: argparse.Namespace) -> str:
             f"- `bce_weight = {args.bce_weight}`",
             f"- `dice_weight = {args.dice_weight}`",
             f"- `base_channels = {args.base_channels}`",
+            f"- `aug_profile = {args.aug_profile}`",
             f"- `patience = {args.patience}`",
             f"- `min_delta = {args.min_delta}`",
             f"- `epochs = {args.epochs}`",
@@ -305,12 +316,18 @@ def run_notes_value(args: argparse.Namespace) -> str:
     return (
         "controlled smoke training, not final training; "
         f"bce_weight={args.bce_weight}, dice_weight={args.dice_weight}, "
-        f"base_channels={args.base_channels}, patience={args.patience}, min_delta={args.min_delta}"
+        f"base_channels={args.base_channels}, aug_profile={args.aug_profile}, "
+        f"patience={args.patience}, min_delta={args.min_delta}"
     )
 
 
 def run_dry_run(args: argparse.Namespace, config: dict[str, Any]) -> None:
-    dataset_root, train_loader, _ = build_dataloaders(config, args.batch_size, args.num_workers)
+    dataset_root, train_loader, _ = build_dataloaders(
+        config=config,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        aug_profile=args.aug_profile,
+    )
     device = resolve_device(args.device)
 
     batch = next(iter(train_loader))
@@ -330,6 +347,7 @@ def run_dry_run(args: argparse.Namespace, config: dict[str, Any]) -> None:
     print(f"bce_weight: {args.bce_weight}")
     print(f"dice_weight: {args.dice_weight}")
     print(f"base_channels: {args.base_channels}")
+    print(f"aug_profile: {args.aug_profile}")
     print(f"patience: {args.patience}")
     print(f"min_delta: {args.min_delta}")
     print(f"dry_run_loss: {float(loss.detach().cpu()):.6f}")
@@ -466,7 +484,12 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         raise ValueError("--min-delta phải >= 0.")
 
     set_seed(args.seed)
-    dataset_root, train_loader, val_loader = build_dataloaders(config, args.batch_size, args.num_workers)
+    dataset_root, train_loader, val_loader = build_dataloaders(
+        config=config,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        aug_profile=args.aug_profile,
+    )
     dataset_id = dataset_root.name
     device = resolve_device(args.device)
     git_commit = get_git_commit(PROJECT_ROOT)
@@ -488,6 +511,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         "bce_weight": args.bce_weight,
         "dice_weight": args.dice_weight,
         "base_channels": args.base_channels,
+        "aug_profile": args.aug_profile,
         "patience": args.patience,
         "min_delta": args.min_delta,
     }
@@ -543,6 +567,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
     print(f"bce_weight: {args.bce_weight}")
     print(f"dice_weight: {args.dice_weight}")
     print(f"base_channels: {args.base_channels}")
+    print(f"aug_profile: {args.aug_profile}")
     print(f"patience: {args.patience}")
     print(f"min_delta: {args.min_delta}")
 
@@ -639,6 +664,10 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
             "dice_weight": args.dice_weight,
         },
         "model_config": model.get_config(),
+        "augmentation": {
+            "train_aug_profile": args.aug_profile,
+            "val_aug_profile": "baseline",
+        },
     }
     dump_json(checkpoints_root / "metrics.json", metrics_summary)
     dump_metrics_csv(experiments_root / "metrics.csv", history)

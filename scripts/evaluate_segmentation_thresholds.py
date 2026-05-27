@@ -14,14 +14,15 @@ from torch.utils.data import DataLoader
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 from src.data.dataset import CrackSegDataset
 from src.data.transforms import get_segmentation_transforms
 from src.models.segmenter import CrackSegmenter
 from src.utils.metrics import binary_f1, binary_iou, binary_precision, binary_recall
-
-
-THRESHOLDS = [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +34,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/data.yaml", help="Đường dẫn config YAML.")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size cho evaluation.")
     parser.add_argument("--num-workers", type=int, default=0, help="Số worker cho DataLoader.")
+    parser.add_argument("--threshold-start", type=float, default=0.20, help="Ngưỡng bắt đầu.")
+    parser.add_argument("--threshold-end", type=float, default=0.70, help="Ngưỡng kết thúc.")
+    parser.add_argument("--threshold-step", type=float, default=0.05, help="Bước nhảy threshold.")
     return parser.parse_args()
 
 
@@ -54,6 +58,20 @@ def resolve_device(device_arg: str) -> torch.device:
     if requested == "cpu":
         return torch.device("cpu")
     raise ValueError(f"--device không hợp lệ: {device_arg}")
+
+
+def build_thresholds(start: float, end: float, step: float) -> list[float]:
+    if step <= 0.0:
+        raise ValueError("--threshold-step phải > 0.")
+    if start < 0.0 or end > 1.0 or start > end:
+        raise ValueError("Threshold range phải nằm trong [0, 1] và start <= end.")
+
+    thresholds: list[float] = []
+    current = start
+    while current <= end + 1e-9:
+        thresholds.append(round(current, 6))
+        current += step
+    return thresholds
 
 
 def load_model(checkpoint_path: Path, device: torch.device) -> CrackSegmenter:
@@ -86,6 +104,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 @torch.no_grad()
 def main() -> int:
     args = parse_args()
+    thresholds = build_thresholds(args.threshold_start, args.threshold_end, args.threshold_step)
     config = load_config(PROJECT_ROOT / args.config)
     device = resolve_device(args.device)
 
@@ -100,7 +119,7 @@ def main() -> int:
     dataset = CrackSegDataset(
         dataset_root=dataset_root,
         split=args.split,
-        transform=get_segmentation_transforms(split="val", image_size=image_size),
+        transform=get_segmentation_transforms(split="val", image_size=image_size, aug_profile="baseline"),
     )
     dataloader = DataLoader(
         dataset,
@@ -112,7 +131,7 @@ def main() -> int:
 
     threshold_sums = {
         threshold: {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0, "count": 0}
-        for threshold in THRESHOLDS
+        for threshold in thresholds
     }
 
     for batch in dataloader:
@@ -123,7 +142,7 @@ def main() -> int:
         if logits.shape != masks.shape:
             raise ValueError(f"Shape mismatch giữa logits {tuple(logits.shape)} và masks {tuple(masks.shape)}")
 
-        for threshold in THRESHOLDS:
+        for threshold in thresholds:
             threshold_sums[threshold]["iou"] += float(binary_iou(logits, masks, threshold=threshold).detach().cpu())
             threshold_sums[threshold]["f1"] += float(binary_f1(logits, masks, threshold=threshold).detach().cpu())
             threshold_sums[threshold]["precision"] += float(binary_precision(logits, masks, threshold=threshold).detach().cpu())
@@ -131,7 +150,7 @@ def main() -> int:
             threshold_sums[threshold]["count"] += 1
 
     rows: list[dict[str, Any]] = []
-    for threshold in THRESHOLDS:
+    for threshold in thresholds:
         count = max(threshold_sums[threshold]["count"], 1)
         rows.append(
             {
@@ -153,6 +172,7 @@ def main() -> int:
     print(f"checkpoint: {checkpoint_path}")
     print(f"dataset_root: {dataset_root}")
     print(f"threshold_sweep_csv: {output_path}")
+    print(f"threshold_range: start={args.threshold_start:.2f} end={args.threshold_end:.2f} step={args.threshold_step:.2f}")
     print(
         "best_by_iou: "
         f"threshold={best_iou_row['threshold']} "
