@@ -1,1 +1,2 @@
 run_id,split,iou,f1,precision,recall,lpips,fid,psnr,ssim,created_at
+seg-unet-attn-r001-s42,val,0.197967,0.306015,0.442651,0.262256,,,,,2026-05-27T13:25:08.791636+00:00

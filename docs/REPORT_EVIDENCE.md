@@ -22,5 +22,9 @@ Mục tiêu của file này là lưu mapping giữa claim trong báo cáo và b�
 | Audit contract test xác nhận active dataset không có reject ratio | `tests/test_audit_dataset_contract.py` | test | Ràng buộc `num_missing_files == 0`, `num_reject_ratio == 0`, `mean_mask_ratio < 0.10` |
 | Dataset/DataLoader segmentation load được sample và batch chuẩn | `tests/test_segmentation_dataset.py` | test | Xác nhận tensor image `[3,512,512]`, mask `[1,512,512]`, DataLoader batch size 2 |
 | Segmentation skeleton forward, loss và metric chạy được | `tests/test_segmentation_model_smoke.py` | test | Smoke test cho `CrackSegmenter`, `bce_dice_loss`, IoU/F1/Precision/Recall |
-| Segmentation model đạt IoU tốt | `results/registry/metric_registry.csv` | metric | Chưa có metric train/eval thật ở giai đoạn này |
+| Smoke training segmentation đã lưu metric, checkpoint và registry đúng quy ước | `checkpoints/segmenter/seg-unet-attn-r001-s42/metrics.json` | json | Lịch sử 5 epoch và best metric của smoke run |
+| Smoke training segmentation đã ghi log epoch theo experiment artifact | `experiments/segmenter/seg-unet-attn-r001-s42/metrics.csv` | csv | `train_loss`, `val_loss`, `val_iou`, `val_f1`, `val_precision`, `val_recall` theo từng epoch |
+| Registry experiment đã ghi nhận smoke run hoàn tất | `results/registry/experiment_registry.csv` | csv | `status = smoke_completed`, chưa phải final training |
+| Registry metric đã ghi nhận best metric của smoke run | `results/registry/metric_registry.csv` | csv | Best validation IoU/F1/Precision/Recall của `seg-unet-attn-r001-s42` |
+| Best smoke run hiện tại đã được đánh dấu nhưng chưa phải final run | `results/registry/best_runs.md` | markdown | Chỉ định rõ đây là best smoke run hiện tại |
 | LaMa cải thiện chất lượng ảnh | `outputs/figures/report/` | figure | Chưa áp dụng ở giai đoạn này |

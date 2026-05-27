@@ -44,3 +44,8 @@
 - Built `ds-crack3d-512-n1000-v001` with 800 train samples and 200 val samples
 - Audit passed with `mean_mask_ratio = 0.007063` and `num_reject_ratio = 0`
 - Marked `ds-crack3d-512-n1000-v001` as accepted and switched `active_dataset` to `n1000`
+
+## v0.1.9 — Segmentation Smoke Training
+- Extended `scripts/train_segmentation.py` with `--smoke-run`, checkpoint saving, experiment artifact saving, and registry updates
+- Completed smoke training run `seg-unet-attn-r001-s42` on `ds-crack3d-512-n1000-v001`
+- Best smoke metric reached `val_iou = 0.197967` after 5 epochs on the current lightweight U-Net attention skeleton
