@@ -64,7 +64,12 @@ def load_model(checkpoint_path: Path, device: torch.device) -> CrackSegmenter:
     if not isinstance(state_dict, dict):
         raise KeyError(f"Checkpoint thiếu `model_state_dict`: {checkpoint_path}")
 
-    model = CrackSegmenter().to(device)
+    model_config = checkpoint.get("model_config") or {}
+    model = CrackSegmenter(
+        in_channels=int(model_config.get("in_channels", 3)),
+        out_channels=int(model_config.get("out_channels", 1)),
+        base_channels=int(model_config.get("base_channels", 8)),
+    ).to(device)
     model.load_state_dict(state_dict)
     model.eval()
     return model

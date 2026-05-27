@@ -61,6 +61,9 @@ class CrackSegmenter(nn.Module):
 
     def __init__(self, in_channels: int = 3, out_channels: int = 1, base_channels: int = 8) -> None:
         super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.base_channels = base_channels
         self.encoder1 = ConvBlock(in_channels, base_channels)
         self.encoder2 = DownBlock(base_channels, base_channels * 2)
         self.encoder3 = DownBlock(base_channels * 2, base_channels * 4)
@@ -81,3 +84,10 @@ class CrackSegmenter(nn.Module):
         x = self.decoder2(x, skip2)
         x = self.decoder1(x, skip1)
         return self.head(x)
+
+    def get_config(self) -> dict[str, int]:
+        return {
+            "in_channels": int(self.in_channels),
+            "out_channels": int(self.out_channels),
+            "base_channels": int(self.base_channels),
+        }

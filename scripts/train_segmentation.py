@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Segmentation training entrypoint.")
     parser.add_argument("--config", default="configs/data.yaml", help="Đường dẫn file cấu hình YAML.")
     parser.add_argument("--dry-run", action="store_true", help="Chỉ chạy 1 batch forward/backward để kiểm tra pipeline.")
-    parser.add_argument("--smoke-run", action="store_true", help="Chạy smoke training ngắn 3–5 epoch.")
+    parser.add_argument("--smoke-run", action="store_true", help="Chạy smoke training ngắn có kiểm soát.")
     parser.add_argument("--epochs", type=int, default=5, help="Số epoch cho smoke-run.")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size cho DataLoader.")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate cho optimizer.")
@@ -40,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default="seg-unet-attn-r001-s42", help="Run ID theo quy ước project.")
     parser.add_argument("--device", default="auto", help="auto, cpu hoặc cuda.")
     parser.add_argument("--num-workers", type=int, default=0, help="Số worker cho DataLoader.")
+    parser.add_argument("--bce-weight", type=float, default=0.5, help="Trọng số BCE trong loss.")
+    parser.add_argument("--dice-weight", type=float, default=0.5, help="Trọng số Dice trong loss.")
+    parser.add_argument("--base-channels", type=int, default=8, help="Số channel gốc của U-Net skeleton.")
     parser.add_argument("--overwrite-run", action="store_true", help="Cho phép ghi đè đúng run_id hiện có.")
     return parser.parse_args()
 
@@ -183,6 +186,7 @@ def load_best_segmentation_run(metric_registry_path: Path, experiment_registry_p
     best_metric_row = max(metric_rows, key=lambda item: item["iou_float"])
     checkpoint_path = ""
     dataset_id = ""
+    notes = ""
     if experiment_registry_path.exists() and experiment_registry_path.stat().st_size > 0:
         with experiment_registry_path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -190,6 +194,7 @@ def load_best_segmentation_run(metric_registry_path: Path, experiment_registry_p
                 if row.get("run_id") == best_metric_row["run_id"]:
                     checkpoint_path = row.get("checkpoint_path", "")
                     dataset_id = row.get("dataset_id", "")
+                    notes = row.get("notes", "")
                     break
 
     return {
@@ -200,6 +205,7 @@ def load_best_segmentation_run(metric_registry_path: Path, experiment_registry_p
         "val_precision": best_metric_row["precision_float"],
         "val_recall": best_metric_row["recall_float"],
         "checkpoint_path": checkpoint_path,
+        "notes": notes,
     }
 
 
@@ -258,28 +264,78 @@ def build_dataloaders(config: dict[str, Any], batch_size: int, num_workers: int)
     return dataset_root, train_loader, val_loader
 
 
+def make_model(base_channels: int, device: torch.device) -> CrackSegmenter:
+    if base_channels <= 0:
+        raise ValueError("--base-channels phải > 0.")
+    return CrackSegmenter(base_channels=base_channels).to(device)
+
+
+def compute_loss(logits: torch.Tensor, masks: torch.Tensor, bce_weight: float, dice_weight: float) -> torch.Tensor:
+    if bce_weight < 0.0 or dice_weight < 0.0:
+        raise ValueError("bce_weight và dice_weight phải không âm.")
+    if bce_weight == 0.0 and dice_weight == 0.0:
+        raise ValueError("Không thể đặt cả bce_weight và dice_weight bằng 0.")
+    return bce_dice_loss(logits, masks, bce_weight=bce_weight, dice_weight=dice_weight)
+
+
+def make_notes_text(args: argparse.Namespace) -> str:
+    return "\n".join(
+        [
+            "# Smoke Training Notes",
+            "",
+            "- Đây là smoke training ngắn để kiểm tra training loop, metric, checkpoint và registry.",
+            "- Không phải final training run.",
+            f"- `bce_weight = {args.bce_weight}`",
+            f"- `dice_weight = {args.dice_weight}`",
+            f"- `base_channels = {args.base_channels}`",
+            f"- `epochs = {args.epochs}`",
+            f"- `batch_size = {args.batch_size}`",
+            f"- `lr = {args.lr}`",
+            f"- `seed = {args.seed}`",
+            "",
+        ]
+    )
+
+
+def run_notes_value(args: argparse.Namespace) -> str:
+    return (
+        "smoke training 3-5 epochs, not final training; "
+        f"bce_weight={args.bce_weight}, dice_weight={args.dice_weight}, base_channels={args.base_channels}"
+    )
+
+
 def run_dry_run(args: argparse.Namespace, config: dict[str, Any]) -> None:
     dataset_root, train_loader, _ = build_dataloaders(config, args.batch_size, args.num_workers)
     device = resolve_device(args.device)
 
     batch = next(iter(train_loader))
-    model = CrackSegmenter().to(device)
+    model = make_model(args.base_channels, device)
     images = batch["image"].to(device)
     masks = batch["mask"].to(device)
 
     model.train()
     logits = model(images)
-    loss = bce_dice_loss(logits, masks)
+    loss = compute_loss(logits, masks, args.bce_weight, args.dice_weight)
     loss.backward()
 
     print(f"device: {device}")
     print(f"dataset_root: {dataset_root}")
     print(f"batch_shape: {tuple(images.shape)}")
     print(f"logits_shape: {tuple(logits.shape)}")
+    print(f"bce_weight: {args.bce_weight}")
+    print(f"dice_weight: {args.dice_weight}")
+    print(f"base_channels: {args.base_channels}")
     print(f"dry_run_loss: {float(loss.detach().cpu()):.6f}")
 
 
-def train_one_epoch(model: CrackSegmenter, loader: DataLoader, optimizer: torch.optim.Optimizer, device: torch.device) -> float:
+def train_one_epoch(
+    model: CrackSegmenter,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    bce_weight: float,
+    dice_weight: float,
+) -> float:
     model.train()
     loss_sum = 0.0
     batch_count = 0
@@ -290,7 +346,7 @@ def train_one_epoch(model: CrackSegmenter, loader: DataLoader, optimizer: torch.
 
         optimizer.zero_grad(set_to_none=True)
         logits = model(images)
-        loss = bce_dice_loss(logits, masks)
+        loss = compute_loss(logits, masks, bce_weight, dice_weight)
         if not torch.isfinite(loss):
             raise RuntimeError(f"Loss không hữu hạn trong train loop: {float(loss.detach().cpu())}")
         loss.backward()
@@ -303,7 +359,13 @@ def train_one_epoch(model: CrackSegmenter, loader: DataLoader, optimizer: torch.
 
 
 @torch.no_grad()
-def evaluate(model: CrackSegmenter, loader: DataLoader, device: torch.device) -> dict[str, float]:
+def evaluate(
+    model: CrackSegmenter,
+    loader: DataLoader,
+    device: torch.device,
+    bce_weight: float,
+    dice_weight: float,
+) -> dict[str, float]:
     model.eval()
     val_loss_sum = 0.0
     iou_sum = 0.0
@@ -317,7 +379,7 @@ def evaluate(model: CrackSegmenter, loader: DataLoader, device: torch.device) ->
         masks = batch["mask"].to(device, non_blocking=True)
 
         logits = model(images)
-        loss = bce_dice_loss(logits, masks)
+        loss = compute_loss(logits, masks, bce_weight, dice_weight)
         if not torch.isfinite(loss):
             raise RuntimeError(f"Loss không hữu hạn trong validation loop: {float(loss.detach().cpu())}")
 
@@ -366,7 +428,13 @@ def make_run_payload(
     }
 
 
-def save_checkpoint(path: Path, model: CrackSegmenter, optimizer: torch.optim.Optimizer, epoch: int, metrics: dict[str, float]) -> None:
+def save_checkpoint(
+    path: Path,
+    model: CrackSegmenter,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    metrics: dict[str, float],
+) -> None:
     ensure_parent(path)
     torch.save(
         {
@@ -374,6 +442,7 @@ def save_checkpoint(path: Path, model: CrackSegmenter, optimizer: torch.optim.Op
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "metrics": metrics,
+            "model_config": model.get_config(),
         },
         path,
     )
@@ -395,8 +464,23 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
     prepare_run_dir(experiments_root, overwrite=args.overwrite_run)
 
     config_snapshot = json.loads(json.dumps(config))
+    config_snapshot["training"] = {
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+        "seed": args.seed,
+        "run_id": args.run_id,
+        "device": args.device,
+        "num_workers": args.num_workers,
+        "bce_weight": args.bce_weight,
+        "dice_weight": args.dice_weight,
+        "base_channels": args.base_channels,
+    }
     dump_yaml(checkpoints_root / "config_snapshot.yaml", config_snapshot)
     dump_yaml(experiments_root / "config_snapshot.yaml", config_snapshot)
+
+    notes_text = make_notes_text(args)
+    notes_value = run_notes_value(args)
 
     run_metadata = make_run_payload(
         run_id=args.run_id,
@@ -408,16 +492,13 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         status="running",
         best_metric="",
         checkpoint_path="",
-        notes="smoke training 3-5 epochs, not final training",
+        notes=notes_value,
     )
     dump_json(checkpoints_root / "run_metadata.json", run_metadata)
     dump_json(experiments_root / "run_metadata.json", run_metadata)
-    (experiments_root / "notes.md").write_text(
-        "# Smoke Training Notes\n\n- Đây là smoke training ngắn để kiểm tra training loop, metric, checkpoint và registry.\n- Không phải final training run.\n",
-        encoding="utf-8",
-    )
+    (experiments_root / "notes.md").write_text(notes_text, encoding="utf-8")
 
-    model = CrackSegmenter().to(device)
+    model = make_model(args.base_channels, device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     history: list[dict[str, Any]] = []
@@ -432,10 +513,13 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         print(f"cuda_device: {torch.cuda.get_device_name(device)}")
     print(f"dataset_root: {dataset_root}")
     print(f"run_id: {args.run_id}")
+    print(f"bce_weight: {args.bce_weight}")
+    print(f"dice_weight: {args.dice_weight}")
+    print(f"base_channels: {args.base_channels}")
 
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, device)
-        val_metrics = evaluate(model, val_loader, device)
+        train_loss = train_one_epoch(model, train_loader, optimizer, device, args.bce_weight, args.dice_weight)
+        val_metrics = evaluate(model, val_loader, device, args.bce_weight, args.dice_weight)
         epoch_row = {
             "epoch": epoch,
             "train_loss": round(train_loss, 6),
@@ -490,6 +574,11 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         "best_epoch": best_epoch,
         "best_metrics": best_metrics,
         "history": history,
+        "loss_config": {
+            "bce_weight": args.bce_weight,
+            "dice_weight": args.dice_weight,
+        },
+        "model_config": model.get_config(),
     }
     dump_json(checkpoints_root / "metrics.json", metrics_summary)
     dump_metrics_csv(experiments_root / "metrics.csv", history)
@@ -505,7 +594,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         status="smoke_completed",
         best_metric=f"val_iou={best_metrics['val_iou']:.6f}",
         checkpoint_path=str(final_checkpoint_path.as_posix()),
-        notes="smoke training 3-5 epochs, not final training",
+        notes=notes_value,
     )
     dump_json(checkpoints_root / "run_metadata.json", final_run_metadata)
     dump_json(experiments_root / "run_metadata.json", final_run_metadata)
@@ -534,7 +623,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
             "status": "smoke_completed",
             "best_metric": f"val_iou={best_metrics['val_iou']:.6f}",
             "checkpoint_path": str(final_checkpoint_path.as_posix()),
-            "notes": "smoke training 3-5 epochs, not final training",
+            "notes": notes_value,
         },
     )
 

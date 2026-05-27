@@ -55,3 +55,9 @@
 - Added `scripts/evaluate_segmentation_thresholds.py` to compare IoU/F1/Precision/Recall across thresholds
 - Completed longer smoke run `seg-unet-attn-r002-s42` for 15 epochs on `ds-crack3d-512-n1000-v001`
 - Updated `best_runs.md` to keep the best smoke run based on actual registry metrics instead of last-run overwrite
+
+## v0.1.11 — Controlled Segmentation Smoke Experiments
+- Added CLI control for `bce_weight`, `dice_weight`, and `base_channels` in `scripts/train_segmentation.py`
+- Completed `seg-unet-attn-r003-dice07-s42` to test Dice-heavy loss weighting
+- Completed `seg-unet-attn-r004-ch32-s42` to test larger model capacity without changing the overall architecture
+- Consolidated `r001`, `r002`, `r003`, and `r004` into a controlled smoke experiment comparison table
