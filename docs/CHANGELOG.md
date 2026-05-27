@@ -39,3 +39,8 @@
 - Added `src/losses/segmentation.py`, `src/utils/metrics.py`, `src/models/attention_gate.py`, and `src/models/segmenter.py`
 - Added `tests/test_segmentation_dataset.py` and `tests/test_segmentation_model_smoke.py`
 - Added `scripts/train_segmentation.py --dry-run` to validate one batch forward/backward without full training
+
+## v0.1.8 — Dataset n1000 Accepted
+- Built `ds-crack3d-512-n1000-v001` with 800 train samples and 200 val samples
+- Audit passed with `mean_mask_ratio = 0.007063` and `num_reject_ratio = 0`
+- Marked `ds-crack3d-512-n1000-v001` as accepted and switched `active_dataset` to `n1000`

@@ -13,6 +13,10 @@ Mục tiêu của file này là lưu mapping giữa claim trong báo cáo và b�
 | Manifest của dataset v002 sẵn sàng cho segmentation smoke tests | `data/processed/ds-crack3d-512-n0200-v002/manifest.csv` | csv | Accepted dataset sample mapping |
 | Audit report của dataset v002 đã pass | `data/processed/ds-crack3d-512-n0200-v002/audit/audit_report.json` | json | Accepted dataset evidence for smoke tests |
 | Overlay audit của dataset v002 xác nhận mask ratio hợp lệ | `data/processed/ds-crack3d-512-n0200-v002/audit/overlays/` | image overlay | Accepted dataset evidence for smoke tests |
+| Dataset n1000 đã được accept cho segmentation smoke training | `data/processed/ds-crack3d-512-n1000-v001/stats.json` | json | Accepted dataset statistics for larger smoke training set |
+| Manifest của dataset n1000 sẵn sàng cho segmentation smoke training | `data/processed/ds-crack3d-512-n1000-v001/manifest.csv` | csv | Accepted dataset sample mapping |
+| Audit report của dataset n1000 đã pass | `data/processed/ds-crack3d-512-n1000-v001/audit/audit_report.json` | json | `num_missing_files = 0`, `num_reject_ratio = 0`, `mean_mask_ratio < 0.10` |
+| Overlay audit của dataset n1000 xác nhận crack placement hợp lệ | `data/processed/ds-crack3d-512-n1000-v001/audit/overlays/` | image overlay | Dùng để kiểm tra trực quan trước smoke training |
 | Unit test xác nhận các hàm degradation core đúng shape, dtype, range | `tests/test_degradation.py` | test | Kiểm tra `compute_heightmap`, `compute_normal_map`, `alpha_blend`, `generate_degraded_pair` |
 | Contract test xác nhận active dataset giữ đúng cấu trúc lưu trữ | `tests/test_build_dataset_contract.py` | test | Kiểm tra manifest, stats, metadata, config snapshot và số lượng file |
 | Audit contract test xác nhận active dataset không có reject ratio | `tests/test_audit_dataset_contract.py` | test | Ràng buộc `num_missing_files == 0`, `num_reject_ratio == 0`, `mean_mask_ratio < 0.10` |
