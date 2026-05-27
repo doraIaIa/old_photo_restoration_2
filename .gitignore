@@ -158,7 +158,7 @@ env.bak/
 venv.bak/
 
 # Project data and model artifacts
-data/
+/data/
 checkpoints/
 outputs/
 experiments/
