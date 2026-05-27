@@ -1,2 +1,3 @@
 run_id,stage,dataset_id,config_path,seed,status,best_metric,checkpoint_path,notes
 seg-unet-attn-r001-s42,segmentation,ds-crack3d-512-n1000-v001,F:/deeplearning/old_photo_restoration_2/configs/data.yaml,42,smoke_completed,val_iou=0.197967,F:/deeplearning/old_photo_restoration_2/checkpoints/segmenter/seg-unet-attn-r001-s42/best_iou.ckpt,"smoke training 3-5 epochs, not final training"
+seg-unet-attn-r002-s42,segmentation,ds-crack3d-512-n1000-v001,F:/deeplearning/old_photo_restoration_2/configs/data.yaml,42,smoke_completed,val_iou=0.321141,F:/deeplearning/old_photo_restoration_2/checkpoints/segmenter/seg-unet-attn-r002-s42/best_iou.ckpt,"smoke training 3-5 epochs, not final training"

@@ -49,3 +49,9 @@
 - Extended `scripts/train_segmentation.py` with `--smoke-run`, checkpoint saving, experiment artifact saving, and registry updates
 - Completed smoke training run `seg-unet-attn-r001-s42` on `ds-crack3d-512-n1000-v001`
 - Best smoke metric reached `val_iou = 0.197967` after 5 epochs on the current lightweight U-Net attention skeleton
+
+## v0.1.10 — Segmentation Prediction Export and Threshold Sweep
+- Added `scripts/export_segmentation_predictions.py` to export visual panels for segmentation predictions
+- Added `scripts/evaluate_segmentation_thresholds.py` to compare IoU/F1/Precision/Recall across thresholds
+- Completed longer smoke run `seg-unet-attn-r002-s42` for 15 epochs on `ds-crack3d-512-n1000-v001`
+- Updated `best_runs.md` to keep the best smoke run based on actual registry metrics instead of last-run overwrite

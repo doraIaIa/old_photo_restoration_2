@@ -158,7 +158,52 @@ def upsert_registry_row(path: Path, header: list[str], match_field: str, row: di
         writer.writerows(rows)
 
 
-def update_best_runs_md(path: Path, run_id: str, dataset_id: str, best_metrics: dict[str, float], checkpoint_path: Path) -> None:
+def load_best_segmentation_run(metric_registry_path: Path, experiment_registry_path: Path) -> dict[str, Any] | None:
+    if not metric_registry_path.exists() or metric_registry_path.stat().st_size == 0:
+        return None
+
+    metric_rows: list[dict[str, Any]] = []
+    with metric_registry_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if not row.get("run_id") or row.get("split") != "val":
+                continue
+            try:
+                row["iou_float"] = float(row["iou"])
+                row["f1_float"] = float(row["f1"])
+                row["precision_float"] = float(row["precision"])
+                row["recall_float"] = float(row["recall"])
+            except (TypeError, ValueError):
+                continue
+            metric_rows.append(row)
+
+    if not metric_rows:
+        return None
+
+    best_metric_row = max(metric_rows, key=lambda item: item["iou_float"])
+    checkpoint_path = ""
+    dataset_id = ""
+    if experiment_registry_path.exists() and experiment_registry_path.stat().st_size > 0:
+        with experiment_registry_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                if row.get("run_id") == best_metric_row["run_id"]:
+                    checkpoint_path = row.get("checkpoint_path", "")
+                    dataset_id = row.get("dataset_id", "")
+                    break
+
+    return {
+        "run_id": best_metric_row["run_id"],
+        "dataset_id": dataset_id,
+        "val_iou": best_metric_row["iou_float"],
+        "val_f1": best_metric_row["f1_float"],
+        "val_precision": best_metric_row["precision_float"],
+        "val_recall": best_metric_row["recall_float"],
+        "checkpoint_path": checkpoint_path,
+    }
+
+
+def update_best_runs_md(path: Path, run_id: str, dataset_id: str, best_metrics: dict[str, float], checkpoint_path: str) -> None:
     content = "\n".join(
         [
             "# Best Runs",
@@ -166,7 +211,7 @@ def update_best_runs_md(path: Path, run_id: str, dataset_id: str, best_metrics: 
             "## Segmentation",
             f"- Run tốt nhất hiện tại: `{run_id}`",
             f"- Lý do chọn: best smoke run hiện tại trên `{dataset_id}` theo `val_iou = {best_metrics['val_iou']:.6f}`; chưa phải final training run",
-            f"- Checkpoint: `{checkpoint_path.as_posix()}`",
+            f"- Checkpoint: `{checkpoint_path}`",
             f"- Metric evidence: `val_f1 = {best_metrics['val_f1']:.6f}`, `val_precision = {best_metrics['val_precision']:.6f}`, `val_recall = {best_metrics['val_recall']:.6f}`",
             "",
             "## Restoration",
@@ -525,13 +570,20 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         },
     )
 
-    update_best_runs_md(
-        PROJECT_ROOT / "results" / "registry" / "best_runs.md",
-        run_id=args.run_id,
-        dataset_id=dataset_id,
-        best_metrics=best_metrics,
-        checkpoint_path=final_checkpoint_path,
-    )
+    best_run = load_best_segmentation_run(metric_registry_path, experiment_registry_path)
+    if best_run is not None:
+        update_best_runs_md(
+            PROJECT_ROOT / "results" / "registry" / "best_runs.md",
+            run_id=str(best_run["run_id"]),
+            dataset_id=str(best_run["dataset_id"] or dataset_id),
+            best_metrics={
+                "val_iou": float(best_run["val_iou"]),
+                "val_f1": float(best_run["val_f1"]),
+                "val_precision": float(best_run["val_precision"]),
+                "val_recall": float(best_run["val_recall"]),
+            },
+            checkpoint_path=str(best_run["checkpoint_path"] or final_checkpoint_path.as_posix()),
+        )
 
     print(f"best_epoch: {best_epoch}")
     print(f"best_val_iou: {best_metrics['val_iou']:.6f}")

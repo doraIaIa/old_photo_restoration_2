@@ -24,7 +24,11 @@ Mục tiêu của file này là lưu mapping giữa claim trong báo cáo và b�
 | Segmentation skeleton forward, loss và metric chạy được | `tests/test_segmentation_model_smoke.py` | test | Smoke test cho `CrackSegmenter`, `bce_dice_loss`, IoU/F1/Precision/Recall |
 | Smoke training segmentation đã lưu metric, checkpoint và registry đúng quy ước | `checkpoints/segmenter/seg-unet-attn-r001-s42/metrics.json` | json | Lịch sử 5 epoch và best metric của smoke run |
 | Smoke training segmentation đã ghi log epoch theo experiment artifact | `experiments/segmenter/seg-unet-attn-r001-s42/metrics.csv` | csv | `train_loss`, `val_loss`, `val_iou`, `val_f1`, `val_precision`, `val_recall` theo từng epoch |
+| Prediction export của smoke run r001 hỗ trợ kiểm tra trực quan under/over-segmentation | `outputs/debug/segmentation/seg-unet-attn-r001-s42/` | image panels | Mỗi panel gồm degraded input, ground-truth mask, predicted mask, overlay |
+| Threshold sweep của smoke run r001 cho thấy ngưỡng tối ưu khác 0.5 | `experiments/segmenter/seg-unet-attn-r001-s42/threshold_sweep.csv` | csv | So sánh IoU/F1/Precision/Recall trên val split |
 | Registry experiment đã ghi nhận smoke run hoàn tất | `results/registry/experiment_registry.csv` | csv | `status = smoke_completed`, chưa phải final training |
 | Registry metric đã ghi nhận best metric của smoke run | `results/registry/metric_registry.csv` | csv | Best validation IoU/F1/Precision/Recall của `seg-unet-attn-r001-s42` |
 | Best smoke run hiện tại đã được đánh dấu nhưng chưa phải final run | `results/registry/best_runs.md` | markdown | Chỉ định rõ đây là best smoke run hiện tại |
+| Prediction export của smoke run r002 hỗ trợ so sánh trực quan với r001 | `outputs/debug/segmentation/seg-unet-attn-r002-s42/` | image panels | Dùng cùng val split để so sánh chất lượng dự đoán |
+| Threshold sweep của smoke run r002 cho thấy ngưỡng tối ưu theo IoU/F1 | `experiments/segmenter/seg-unet-attn-r002-s42/threshold_sweep.csv` | csv | Dùng để quyết định threshold inference phù hợp hơn 0.5 |
 | LaMa cải thiện chất lượng ảnh | `outputs/figures/report/` | figure | Chưa áp dụng ở giai đoạn này |
