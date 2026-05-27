@@ -29,13 +29,13 @@ from src.utils.metrics import binary_f1, binary_iou, binary_precision, binary_re
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Segmentation training entrypoint.")
+    parser = argparse.ArgumentParser(description="Entrypoint huấn luyện segmentation.")
     parser.add_argument("--config", default="configs/data.yaml", help="Đường dẫn file cấu hình YAML.")
-    parser.add_argument("--dry-run", action="store_true", help="Chỉ chạy 1 batch forward/backward để kiểm tra pipeline.")
+    parser.add_argument("--dry-run", action="store_true", help="Chạy một batch forward/backward để kiểm tra pipeline.")
     parser.add_argument("--smoke-run", action="store_true", help="Chạy smoke training ngắn có kiểm soát.")
     parser.add_argument("--epochs", type=int, default=5, help="Số epoch cho smoke-run.")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size cho DataLoader.")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate cho optimizer.")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--run-id", default="seg-unet-attn-r001-s42", help="Run ID theo quy ước project.")
     parser.add_argument("--device", default="auto", help="auto, cpu hoặc cuda.")
@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bce-weight", type=float, default=0.5, help="Trọng số BCE trong loss.")
     parser.add_argument("--dice-weight", type=float, default=0.5, help="Trọng số Dice trong loss.")
     parser.add_argument("--base-channels", type=int, default=8, help="Số channel gốc của U-Net skeleton.")
+    parser.add_argument("--patience", type=int, default=8, help="Số epoch chờ cải thiện `val_iou` trước khi early stop.")
+    parser.add_argument("--min-delta", type=float, default=5e-4, help="Mức cải thiện tối thiểu của `val_iou` để reset patience.")
     parser.add_argument("--overwrite-run", action="store_true", help="Cho phép ghi đè đúng run_id hiện có.")
     return parser.parse_args()
 
@@ -129,6 +131,9 @@ def dump_metrics_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "val_f1",
         "val_precision",
         "val_recall",
+        "improved",
+        "epochs_without_improvement",
+        "early_stop_triggered",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -141,8 +146,7 @@ def upsert_registry_row(path: Path, header: list[str], match_field: str, row: di
     rows: list[dict[str, Any]] = []
     if path.exists() and path.stat().st_size > 0:
         with path.open("r", encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            rows = list(reader)
+            rows = list(csv.DictReader(handle))
 
     updated = False
     for existing in rows:
@@ -167,8 +171,7 @@ def load_best_segmentation_run(metric_registry_path: Path, experiment_registry_p
 
     metric_rows: list[dict[str, Any]] = []
     with metric_registry_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
+        for row in csv.DictReader(handle):
             if not row.get("run_id") or row.get("split") != "val":
                 continue
             try:
@@ -189,8 +192,7 @@ def load_best_segmentation_run(metric_registry_path: Path, experiment_registry_p
     notes = ""
     if experiment_registry_path.exists() and experiment_registry_path.stat().st_size > 0:
         with experiment_registry_path.open("r", encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
+            for row in csv.DictReader(handle):
                 if row.get("run_id") == best_metric_row["run_id"]:
                     checkpoint_path = row.get("checkpoint_path", "")
                     dataset_id = row.get("dataset_id", "")
@@ -288,6 +290,8 @@ def make_notes_text(args: argparse.Namespace) -> str:
             f"- `bce_weight = {args.bce_weight}`",
             f"- `dice_weight = {args.dice_weight}`",
             f"- `base_channels = {args.base_channels}`",
+            f"- `patience = {args.patience}`",
+            f"- `min_delta = {args.min_delta}`",
             f"- `epochs = {args.epochs}`",
             f"- `batch_size = {args.batch_size}`",
             f"- `lr = {args.lr}`",
@@ -299,8 +303,9 @@ def make_notes_text(args: argparse.Namespace) -> str:
 
 def run_notes_value(args: argparse.Namespace) -> str:
     return (
-        "smoke training 3-5 epochs, not final training; "
-        f"bce_weight={args.bce_weight}, dice_weight={args.dice_weight}, base_channels={args.base_channels}"
+        "controlled smoke training, not final training; "
+        f"bce_weight={args.bce_weight}, dice_weight={args.dice_weight}, "
+        f"base_channels={args.base_channels}, patience={args.patience}, min_delta={args.min_delta}"
     )
 
 
@@ -325,6 +330,8 @@ def run_dry_run(args: argparse.Namespace, config: dict[str, Any]) -> None:
     print(f"bce_weight: {args.bce_weight}")
     print(f"dice_weight: {args.dice_weight}")
     print(f"base_channels: {args.base_channels}")
+    print(f"patience: {args.patience}")
+    print(f"min_delta: {args.min_delta}")
     print(f"dry_run_loss: {float(loss.detach().cpu()):.6f}")
 
 
@@ -411,6 +418,7 @@ def make_run_payload(
     best_metric: str,
     checkpoint_path: str,
     notes: str,
+    early_stopping: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -425,6 +433,7 @@ def make_run_payload(
         "best_metric": best_metric,
         "checkpoint_path": checkpoint_path,
         "notes": notes,
+        "early_stopping": early_stopping,
     }
 
 
@@ -451,6 +460,10 @@ def save_checkpoint(
 def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None:
     if args.epochs <= 0:
         raise ValueError("--epochs phải > 0 khi dùng --smoke-run.")
+    if args.patience < 0:
+        raise ValueError("--patience phải >= 0.")
+    if args.min_delta < 0.0:
+        raise ValueError("--min-delta phải >= 0.")
 
     set_seed(args.seed)
     dataset_root, train_loader, val_loader = build_dataloaders(config, args.batch_size, args.num_workers)
@@ -475,12 +488,22 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         "bce_weight": args.bce_weight,
         "dice_weight": args.dice_weight,
         "base_channels": args.base_channels,
+        "patience": args.patience,
+        "min_delta": args.min_delta,
     }
     dump_yaml(checkpoints_root / "config_snapshot.yaml", config_snapshot)
     dump_yaml(experiments_root / "config_snapshot.yaml", config_snapshot)
 
     notes_text = make_notes_text(args)
     notes_value = run_notes_value(args)
+    early_stopping_state = {
+        "enabled": True,
+        "patience": args.patience,
+        "min_delta": args.min_delta,
+        "triggered": False,
+        "stopped_epoch": None,
+        "epochs_without_improvement_at_stop": 0,
+    }
 
     run_metadata = make_run_payload(
         run_id=args.run_id,
@@ -493,6 +516,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         best_metric="",
         checkpoint_path="",
         notes=notes_value,
+        early_stopping=early_stopping_state,
     )
     dump_json(checkpoints_root / "run_metadata.json", run_metadata)
     dump_json(experiments_root / "run_metadata.json", run_metadata)
@@ -505,6 +529,9 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
     best_metrics: dict[str, float] | None = None
     best_epoch = 0
     best_iou = -1.0
+    epochs_without_improvement = 0
+    early_stop_triggered = False
+    stopped_epoch: int | None = None
 
     print(f"device: {device}")
     if device.type == "cpu":
@@ -516,10 +543,18 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
     print(f"bce_weight: {args.bce_weight}")
     print(f"dice_weight: {args.dice_weight}")
     print(f"base_channels: {args.base_channels}")
+    print(f"patience: {args.patience}")
+    print(f"min_delta: {args.min_delta}")
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, args.bce_weight, args.dice_weight)
         val_metrics = evaluate(model, val_loader, device, args.bce_weight, args.dice_weight)
+        is_improved = val_metrics["val_iou"] > (best_iou + args.min_delta)
+        if is_improved:
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
         epoch_row = {
             "epoch": epoch,
             "train_loss": round(train_loss, 6),
@@ -528,6 +563,9 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
             "val_f1": round(val_metrics["val_f1"], 6),
             "val_precision": round(val_metrics["val_precision"], 6),
             "val_recall": round(val_metrics["val_recall"], 6),
+            "improved": int(is_improved),
+            "epochs_without_improvement": epochs_without_improvement,
+            "early_stop_triggered": 0,
         }
         history.append(epoch_row)
 
@@ -541,7 +579,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
             f"val_recall={epoch_row['val_recall']:.6f}"
         )
 
-        if val_metrics["val_iou"] > best_iou:
+        if is_improved:
             best_iou = val_metrics["val_iou"]
             best_epoch = epoch
             best_metrics = {
@@ -563,15 +601,37 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
             },
         )
 
+        if args.patience > 0 and epochs_without_improvement >= args.patience:
+            early_stop_triggered = True
+            stopped_epoch = epoch
+            history[-1]["early_stop_triggered"] = 1
+            print(
+                f"early_stopping: triggered at epoch={epoch} "
+                f"best_epoch={best_epoch} best_val_iou={best_iou:.6f} "
+                f"epochs_without_improvement={epochs_without_improvement}"
+            )
+            break
+
     if best_metrics is None:
         raise RuntimeError("Smoke training kết thúc nhưng không ghi nhận được best metrics.")
+
+    early_stopping_state = {
+        "enabled": True,
+        "patience": args.patience,
+        "min_delta": args.min_delta,
+        "triggered": early_stop_triggered,
+        "stopped_epoch": stopped_epoch or history[-1]["epoch"],
+        "epochs_without_improvement_at_stop": epochs_without_improvement,
+    }
 
     metrics_summary = {
         "run_id": args.run_id,
         "dataset_id": dataset_id,
         "device": str(device),
-        "epochs": args.epochs,
+        "epochs_requested": args.epochs,
+        "epochs_executed": history[-1]["epoch"],
         "best_epoch": best_epoch,
+        "early_stopping": early_stopping_state,
         "best_metrics": best_metrics,
         "history": history,
         "loss_config": {
@@ -595,6 +655,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         best_metric=f"val_iou={best_metrics['val_iou']:.6f}",
         checkpoint_path=str(final_checkpoint_path.as_posix()),
         notes=notes_value,
+        early_stopping=early_stopping_state,
     )
     dump_json(checkpoints_root / "run_metadata.json", final_run_metadata)
     dump_json(experiments_root / "run_metadata.json", final_run_metadata)
@@ -623,7 +684,7 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
             "status": "smoke_completed",
             "best_metric": f"val_iou={best_metrics['val_iou']:.6f}",
             "checkpoint_path": str(final_checkpoint_path.as_posix()),
-            "notes": notes_value,
+            "notes": notes_value + f"; early_stop_triggered={early_stop_triggered}",
         },
     )
 
@@ -676,6 +737,8 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
 
     print(f"best_epoch: {best_epoch}")
     print(f"best_val_iou: {best_metrics['val_iou']:.6f}")
+    print(f"early_stop_triggered: {early_stop_triggered}")
+    print(f"stopped_epoch: {stopped_epoch or history[-1]['epoch']}")
     print(f"checkpoint_root: {checkpoints_root}")
     print(f"experiment_root: {experiments_root}")
 

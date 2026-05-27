@@ -61,3 +61,9 @@
 - Completed `seg-unet-attn-r003-dice07-s42` to test Dice-heavy loss weighting
 - Completed `seg-unet-attn-r004-ch32-s42` to test larger model capacity without changing the overall architecture
 - Consolidated `r001`, `r002`, `r003`, and `r004` into a controlled smoke experiment comparison table
+
+## v0.1.12 — Longer Segmentation Smoke Baseline
+- Added early stopping controls `--patience` and `--min-delta` to `scripts/train_segmentation.py`
+- Completed `seg-unet-attn-r005-long-s42` for up to 30 epochs on `ds-crack3d-512-n1000-v001`
+- Recorded that `r005` finished without early stop and surpassed `r002` on validation IoU/F1
+- Updated the controlled smoke comparison table to include `r005`
