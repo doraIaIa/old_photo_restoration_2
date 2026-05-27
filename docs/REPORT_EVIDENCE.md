@@ -4,14 +4,19 @@ Mục tiêu của file này là lưu mapping giữa claim trong báo cáo và b�
 
 | Claim | Evidence path | Type | Notes |
 |---|---|---|---|
-| Degradation pipeline tạo mask GT chính xác | `data/processed/<dataset_id>/previews/` | image preview | overlay degraded/mask |
-| Dataset statistics hợp lệ | `data/processed/<dataset_id>/stats.json` | json | mask pixel distribution |
-| Synthetic dataset manifest phục vụ truy vết sample | `data/processed/<dataset_id>/manifest.csv` | csv | clean source, crack source, sample mapping |
-| Audit phát hiện dataset v001 không phù hợp để train segmentation | `data/processed/ds-crack3d-512-n0200-v001/audit/audit_report.json` | json | failed/rejected dataset evidence, không dùng để train |
-| Overlay audit xác nhận mask quá lớn trên dataset v001 | `data/processed/ds-crack3d-512-n0200-v001/audit/overlays/` | image overlay | failed/rejected dataset evidence, không dùng để train |
-| Dataset v002 đã được accept cho segmentation smoke tests | `data/processed/ds-crack3d-512-n0200-v002/stats.json` | json | accepted dataset statistics |
-| Manifest của dataset v002 sẵn sàng cho segmentation smoke tests | `data/processed/ds-crack3d-512-n0200-v002/manifest.csv` | csv | accepted dataset sample mapping |
-| Audit report của dataset v002 đã pass | `data/processed/ds-crack3d-512-n0200-v002/audit/audit_report.json` | json | accepted dataset evidence for smoke tests |
-| Overlay audit của dataset v002 xác nhận mask ratio hợp lệ | `data/processed/ds-crack3d-512-n0200-v002/audit/overlays/` | image overlay | accepted dataset evidence for smoke tests |
-| Segmentation model đạt IoU tốt | `results/registry/metric_registry.csv` | metric | val IoU/F1 |
-| LaMa cải thiện chất lượng ảnh | `outputs/figures/report/` | figure | before/after comparison |
+| Degradation pipeline tạo mask GT chính xác | `data/processed/<dataset_id>/previews/` | image preview | Overlay degraded/mask để kiểm tra trực quan |
+| Dataset statistics hợp lệ | `data/processed/<dataset_id>/stats.json` | json | Thống kê phân bố mask pixel |
+| Synthetic dataset manifest phục vụ truy vết sample | `data/processed/<dataset_id>/manifest.csv` | csv | Mapping giữa sample, clean source, crack source |
+| Audit phát hiện dataset v001 không phù hợp để train segmentation | `data/processed/ds-crack3d-512-n0200-v001/audit/audit_report.json` | json | Failed/rejected dataset evidence, không dùng để train |
+| Overlay audit xác nhận mask quá lớn trên dataset v001 | `data/processed/ds-crack3d-512-n0200-v001/audit/overlays/` | image overlay | Failed/rejected dataset evidence, không dùng để train |
+| Dataset v002 đã được accept cho segmentation smoke tests | `data/processed/ds-crack3d-512-n0200-v002/stats.json` | json | Accepted dataset statistics |
+| Manifest của dataset v002 sẵn sàng cho segmentation smoke tests | `data/processed/ds-crack3d-512-n0200-v002/manifest.csv` | csv | Accepted dataset sample mapping |
+| Audit report của dataset v002 đã pass | `data/processed/ds-crack3d-512-n0200-v002/audit/audit_report.json` | json | Accepted dataset evidence for smoke tests |
+| Overlay audit của dataset v002 xác nhận mask ratio hợp lệ | `data/processed/ds-crack3d-512-n0200-v002/audit/overlays/` | image overlay | Accepted dataset evidence for smoke tests |
+| Unit test xác nhận các hàm degradation core đúng shape, dtype, range | `tests/test_degradation.py` | test | Kiểm tra `compute_heightmap`, `compute_normal_map`, `alpha_blend`, `generate_degraded_pair` |
+| Contract test xác nhận active dataset giữ đúng cấu trúc lưu trữ | `tests/test_build_dataset_contract.py` | test | Kiểm tra manifest, stats, metadata, config snapshot và số lượng file |
+| Audit contract test xác nhận active dataset không có reject ratio | `tests/test_audit_dataset_contract.py` | test | Ràng buộc `num_missing_files == 0`, `num_reject_ratio == 0`, `mean_mask_ratio < 0.10` |
+| Dataset/DataLoader segmentation load được sample và batch chuẩn | `tests/test_segmentation_dataset.py` | test | Xác nhận tensor image `[3,512,512]`, mask `[1,512,512]`, DataLoader batch size 2 |
+| Segmentation skeleton forward, loss và metric chạy được | `tests/test_segmentation_model_smoke.py` | test | Smoke test cho `CrackSegmenter`, `bce_dice_loss`, IoU/F1/Precision/Recall |
+| Segmentation model đạt IoU tốt | `results/registry/metric_registry.csv` | metric | Chưa có metric train/eval thật ở giai đoạn này |
+| LaMa cải thiện chất lượng ảnh | `outputs/figures/report/` | figure | Chưa áp dụng ở giai đoạn này |

@@ -32,3 +32,10 @@
 - Built `ds-crack3d-512-n0200-v002` using processed RGBA crack bank
 - Audit passed with `mean_mask_ratio = 0.008334`
 - Marked dataset as accepted for segmentation smoke tests
+
+## v0.1.7 — Segmentation Data Pipeline Smoke
+- Added `tests/test_degradation.py`, `tests/test_build_dataset_contract.py`, and `tests/test_audit_dataset_contract.py`
+- Added `src/data/dataset.py` and `src/data/transforms.py` for segmentation loading
+- Added `src/losses/segmentation.py`, `src/utils/metrics.py`, `src/models/attention_gate.py`, and `src/models/segmenter.py`
+- Added `tests/test_segmentation_dataset.py` and `tests/test_segmentation_model_smoke.py`
+- Added `scripts/train_segmentation.py --dry-run` to validate one batch forward/backward without full training
