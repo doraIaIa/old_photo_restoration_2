@@ -1,1 +1,2 @@
 dataset_id,num_samples,image_size,seed,version,created_at,status,notes
+ds-crack3d-512-n0200-v001,200,512,42,v001,2026-05-27T11:57:20.821235+00:00,rejected,rejected by audit: mask ratio too high; raw road JPG used as crack source

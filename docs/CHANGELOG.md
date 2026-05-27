@@ -19,3 +19,11 @@
 - Added changelog and ADR structure
 - Added result registry templates for dataset, experiment, metric tracking
 - Added report evidence index and metadata standard for reproducibility
+
+## v0.1.4 — Dataset Builder
+- Added `scripts/build_dataset.py` for synthetic dataset generation from DIV2K + CrackBank
+
+## v0.1.5 — Dataset Audit Rejection
+- Ran `scripts/audit_dataset.py` on `ds-crack3d-512-n0200-v001`
+- Dataset rejected due to excessive mask ratio
+- Next action: preprocess CrackForest into RGBA crack bank

@@ -2,6 +2,7 @@ raw:
   div2k_train: "data/clean/div2k/train"
   div2k_val: "data/clean/div2k/val"
   crack_bank_raw: "data/crack_bank/raw"
+  crack_bank_processed_rgba: "data/crack_bank/processed/rgba"
 
 processed:
   root: "data/processed"
@@ -13,7 +14,10 @@ build:
   num_samples: 200
   val_ratio: 0.2
   seed: 42
-  version: "v001"
+  version: "v002"
+  crack_source: "processed_rgba"
+  mask_ratio_min: 0.0005
+  mask_ratio_max: 0.08
 
 outputs:
   debug_root: "outputs/debug"
