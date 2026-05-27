@@ -1,0 +1,27 @@
+raw:
+  div2k_train: "data/clean/div2k/train"
+  div2k_val: "data/clean/div2k/val"
+  crack_bank_raw: "data/crack_bank/raw"
+
+processed:
+  root: "data/processed"
+  active_dataset: "ds-crack3d-512-n0200-v001"
+
+build:
+  degradation: "crack3d"
+  image_size: 512
+  num_samples: 200
+  val_ratio: 0.2
+  seed: 42
+  version: "v001"
+
+outputs:
+  debug_root: "outputs/debug"
+  inference_root: "outputs/inference"
+  figures_root: "outputs/figures"
+
+checkpoints:
+  root: "checkpoints"
+
+experiments:
+  root: "experiments"

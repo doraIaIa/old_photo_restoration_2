@@ -1,0 +1,21 @@
+# Changelog
+
+## v0.1.0 — Phase 1 Degradation Core
+- Added `src/data/degradation.py`
+- Implemented `compute_heightmap`, `compute_normal_map`, `apply_phong_illumination`
+- Self-test passed
+
+## v0.1.1 — Data Preparation
+- Copied DIV2K subset: 50 train, 10 val
+- Copied CrackForest subset: 20 crack images
+- Moved external CrackForest repo outside project
+
+## v0.1.2 — Project Governance Foundation
+- Added storage convention, skill matrix, data audit checklist, testing strategy
+- Added codebase graph plan for future repo visualization
+- Standardized `configs/data.yaml` for Phase 1 artifact flow
+
+## v0.1.3 — Registry and Decision Logs
+- Added changelog and ADR structure
+- Added result registry templates for dataset, experiment, metric tracking
+- Added report evidence index and metadata standard for reproducibility

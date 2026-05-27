@@ -157,6 +157,21 @@ ENV/
 env.bak/
 venv.bak/
 
+# Project data and model artifacts
+data/
+checkpoints/
+outputs/
+experiments/
+wandb/
+temp_crackforest/
+CrackForest-dataset/
+DeepCrack/
+temp_*/
+*_tmp/
+*.ckpt
+*.pth
+*.pt
+
 # Spyder project settings
 .spyderproject
 .spyproject
