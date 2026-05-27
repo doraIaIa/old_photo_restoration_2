@@ -6,7 +6,7 @@ raw:
 
 processed:
   root: "data/processed"
-  active_dataset: "ds-crack3d-512-n0200-v001"
+  active_dataset: "ds-crack3d-512-n0200-v002"
 
 build:
   degradation: "crack3d"

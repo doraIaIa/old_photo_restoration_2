@@ -27,3 +27,8 @@
 - Ran `scripts/audit_dataset.py` on `ds-crack3d-512-n0200-v001`
 - Dataset rejected due to excessive mask ratio
 - Next action: preprocess CrackForest into RGBA crack bank
+
+## v0.1.6 — Dataset v002 Accepted
+- Built `ds-crack3d-512-n0200-v002` using processed RGBA crack bank
+- Audit passed with `mean_mask_ratio = 0.008334`
+- Marked dataset as accepted for segmentation smoke tests
