@@ -27,9 +27,12 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from src.data.dataset import CrackSegDataset
 from src.data.transforms import VALID_AUG_PROFILES, get_segmentation_transforms
-from src.losses.segmentation import bce_dice_loss
+from src.losses.segmentation import bce_dice_loss, bce_tversky_loss
 from src.models.segmenter import CrackSegmenter
 from src.utils.metrics import binary_f1, binary_iou, binary_precision, binary_recall
+
+
+VALID_LOSS_TYPES = {"bce_dice", "bce_tversky"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,8 +47,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default="seg-unet-attn-r001-s42", help="Run ID theo quy ước project.")
     parser.add_argument("--device", default="auto", help="auto, cpu hoặc cuda.")
     parser.add_argument("--num-workers", type=int, default=0, help="Số worker cho DataLoader.")
+    parser.add_argument("--loss-type", choices=sorted(VALID_LOSS_TYPES), default="bce_dice", help="Loại loss cho segmentation.")
     parser.add_argument("--bce-weight", type=float, default=0.5, help="Trọng số BCE trong loss.")
-    parser.add_argument("--dice-weight", type=float, default=0.5, help="Trọng số Dice trong loss.")
+    parser.add_argument("--dice-weight", type=float, default=0.5, help="Trọng số Dice trong `bce_dice`.")
+    parser.add_argument("--tversky-alpha", type=float, default=0.5, help="Alpha của Tversky loss.")
+    parser.add_argument("--tversky-beta", type=float, default=0.5, help="Beta của Tversky loss.")
     parser.add_argument("--base-channels", type=int, default=8, help="Số channel gốc của U-Net skeleton.")
     parser.add_argument("--aug-profile", choices=sorted(VALID_AUG_PROFILES), default="baseline", help="Profile augmentation cho train split.")
     parser.add_argument("--patience", type=int, default=8, help="Số epoch chờ cải thiện `val_iou` trước khi early stop.")
@@ -282,12 +288,27 @@ def make_model(base_channels: int, device: torch.device) -> CrackSegmenter:
     return CrackSegmenter(base_channels=base_channels).to(device)
 
 
-def compute_loss(logits: torch.Tensor, masks: torch.Tensor, bce_weight: float, dice_weight: float) -> torch.Tensor:
-    if bce_weight < 0.0 or dice_weight < 0.0:
-        raise ValueError("bce_weight và dice_weight phải không âm.")
-    if bce_weight == 0.0 and dice_weight == 0.0:
-        raise ValueError("Không thể đặt cả bce_weight và dice_weight bằng 0.")
-    return bce_dice_loss(logits, masks, bce_weight=bce_weight, dice_weight=dice_weight)
+def compute_loss(
+    logits: torch.Tensor,
+    masks: torch.Tensor,
+    loss_type: str,
+    bce_weight: float,
+    dice_weight: float,
+    tversky_alpha: float,
+    tversky_beta: float,
+) -> torch.Tensor:
+    if loss_type == "bce_dice":
+        return bce_dice_loss(logits, masks, bce_weight=bce_weight, dice_weight=dice_weight)
+    if loss_type == "bce_tversky":
+        return bce_tversky_loss(
+            logits,
+            masks,
+            bce_weight=bce_weight,
+            tversky_weight=dice_weight,
+            alpha=tversky_alpha,
+            beta=tversky_beta,
+        )
+    raise ValueError(f"loss_type không hợp lệ: {loss_type}")
 
 
 def make_notes_text(args: argparse.Namespace) -> str:
@@ -297,8 +318,11 @@ def make_notes_text(args: argparse.Namespace) -> str:
             "",
             "- Đây là smoke training ngắn để kiểm tra training loop, metric, checkpoint và registry.",
             "- Không phải final training run.",
+            f"- `loss_type = {args.loss_type}`",
             f"- `bce_weight = {args.bce_weight}`",
             f"- `dice_weight = {args.dice_weight}`",
+            f"- `tversky_alpha = {args.tversky_alpha}`",
+            f"- `tversky_beta = {args.tversky_beta}`",
             f"- `base_channels = {args.base_channels}`",
             f"- `aug_profile = {args.aug_profile}`",
             f"- `patience = {args.patience}`",
@@ -315,7 +339,8 @@ def make_notes_text(args: argparse.Namespace) -> str:
 def run_notes_value(args: argparse.Namespace) -> str:
     return (
         "controlled smoke training, not final training; "
-        f"bce_weight={args.bce_weight}, dice_weight={args.dice_weight}, "
+        f"loss_type={args.loss_type}, bce_weight={args.bce_weight}, dice_weight={args.dice_weight}, "
+        f"tversky_alpha={args.tversky_alpha}, tversky_beta={args.tversky_beta}, "
         f"base_channels={args.base_channels}, aug_profile={args.aug_profile}, "
         f"patience={args.patience}, min_delta={args.min_delta}"
     )
@@ -337,15 +362,26 @@ def run_dry_run(args: argparse.Namespace, config: dict[str, Any]) -> None:
 
     model.train()
     logits = model(images)
-    loss = compute_loss(logits, masks, args.bce_weight, args.dice_weight)
+    loss = compute_loss(
+        logits=logits,
+        masks=masks,
+        loss_type=args.loss_type,
+        bce_weight=args.bce_weight,
+        dice_weight=args.dice_weight,
+        tversky_alpha=args.tversky_alpha,
+        tversky_beta=args.tversky_beta,
+    )
     loss.backward()
 
     print(f"device: {device}")
     print(f"dataset_root: {dataset_root}")
     print(f"batch_shape: {tuple(images.shape)}")
     print(f"logits_shape: {tuple(logits.shape)}")
+    print(f"loss_type: {args.loss_type}")
     print(f"bce_weight: {args.bce_weight}")
     print(f"dice_weight: {args.dice_weight}")
+    print(f"tversky_alpha: {args.tversky_alpha}")
+    print(f"tversky_beta: {args.tversky_beta}")
     print(f"base_channels: {args.base_channels}")
     print(f"aug_profile: {args.aug_profile}")
     print(f"patience: {args.patience}")
@@ -358,8 +394,11 @@ def train_one_epoch(
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    loss_type: str,
     bce_weight: float,
     dice_weight: float,
+    tversky_alpha: float,
+    tversky_beta: float,
 ) -> float:
     model.train()
     loss_sum = 0.0
@@ -371,7 +410,15 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         logits = model(images)
-        loss = compute_loss(logits, masks, bce_weight, dice_weight)
+        loss = compute_loss(
+            logits=logits,
+            masks=masks,
+            loss_type=loss_type,
+            bce_weight=bce_weight,
+            dice_weight=dice_weight,
+            tversky_alpha=tversky_alpha,
+            tversky_beta=tversky_beta,
+        )
         if not torch.isfinite(loss):
             raise RuntimeError(f"Loss không hữu hạn trong train loop: {float(loss.detach().cpu())}")
         loss.backward()
@@ -388,8 +435,11 @@ def evaluate(
     model: CrackSegmenter,
     loader: DataLoader,
     device: torch.device,
+    loss_type: str,
     bce_weight: float,
     dice_weight: float,
+    tversky_alpha: float,
+    tversky_beta: float,
 ) -> dict[str, float]:
     model.eval()
     val_loss_sum = 0.0
@@ -404,7 +454,15 @@ def evaluate(
         masks = batch["mask"].to(device, non_blocking=True)
 
         logits = model(images)
-        loss = compute_loss(logits, masks, bce_weight, dice_weight)
+        loss = compute_loss(
+            logits=logits,
+            masks=masks,
+            loss_type=loss_type,
+            bce_weight=bce_weight,
+            dice_weight=dice_weight,
+            tversky_alpha=tversky_alpha,
+            tversky_beta=tversky_beta,
+        )
         if not torch.isfinite(loss):
             raise RuntimeError(f"Loss không hữu hạn trong validation loop: {float(loss.detach().cpu())}")
 
@@ -482,6 +540,8 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         raise ValueError("--patience phải >= 0.")
     if args.min_delta < 0.0:
         raise ValueError("--min-delta phải >= 0.")
+    if args.tversky_alpha < 0.0 or args.tversky_beta < 0.0:
+        raise ValueError("--tversky-alpha và --tversky-beta phải >= 0.")
 
     set_seed(args.seed)
     dataset_root, train_loader, val_loader = build_dataloaders(
@@ -508,8 +568,11 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         "run_id": args.run_id,
         "device": args.device,
         "num_workers": args.num_workers,
+        "loss_type": args.loss_type,
         "bce_weight": args.bce_weight,
         "dice_weight": args.dice_weight,
+        "tversky_alpha": args.tversky_alpha,
+        "tversky_beta": args.tversky_beta,
         "base_channels": args.base_channels,
         "aug_profile": args.aug_profile,
         "patience": args.patience,
@@ -564,16 +627,38 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         print(f"cuda_device: {torch.cuda.get_device_name(device)}")
     print(f"dataset_root: {dataset_root}")
     print(f"run_id: {args.run_id}")
+    print(f"loss_type: {args.loss_type}")
     print(f"bce_weight: {args.bce_weight}")
     print(f"dice_weight: {args.dice_weight}")
+    print(f"tversky_alpha: {args.tversky_alpha}")
+    print(f"tversky_beta: {args.tversky_beta}")
     print(f"base_channels: {args.base_channels}")
     print(f"aug_profile: {args.aug_profile}")
     print(f"patience: {args.patience}")
     print(f"min_delta: {args.min_delta}")
 
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, device, args.bce_weight, args.dice_weight)
-        val_metrics = evaluate(model, val_loader, device, args.bce_weight, args.dice_weight)
+        train_loss = train_one_epoch(
+            model=model,
+            loader=train_loader,
+            optimizer=optimizer,
+            device=device,
+            loss_type=args.loss_type,
+            bce_weight=args.bce_weight,
+            dice_weight=args.dice_weight,
+            tversky_alpha=args.tversky_alpha,
+            tversky_beta=args.tversky_beta,
+        )
+        val_metrics = evaluate(
+            model=model,
+            loader=val_loader,
+            device=device,
+            loss_type=args.loss_type,
+            bce_weight=args.bce_weight,
+            dice_weight=args.dice_weight,
+            tversky_alpha=args.tversky_alpha,
+            tversky_beta=args.tversky_beta,
+        )
         is_improved = val_metrics["val_iou"] > (best_iou + args.min_delta)
         if is_improved:
             epochs_without_improvement = 0
@@ -660,8 +745,11 @@ def run_smoke_training(args: argparse.Namespace, config: dict[str, Any]) -> None
         "best_metrics": best_metrics,
         "history": history,
         "loss_config": {
+            "loss_type": args.loss_type,
             "bce_weight": args.bce_weight,
             "dice_weight": args.dice_weight,
+            "tversky_alpha": args.tversky_alpha,
+            "tversky_beta": args.tversky_beta,
         },
         "model_config": model.get_config(),
         "augmentation": {

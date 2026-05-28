@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from src.losses.segmentation import bce_dice_loss
+from src.losses.segmentation import bce_dice_loss, tversky_loss
 from src.models.segmenter import CrackSegmenter
 from src.utils.metrics import binary_f1, binary_iou, binary_precision, binary_recall
 
@@ -29,3 +29,19 @@ def test_segmentation_model_loss_and_metrics_smoke() -> None:
         assert torch.isfinite(metric)
         assert float(metric) >= 0.0
         assert float(metric) <= 1.0
+
+
+def test_tversky_loss_behaviour_for_match_and_miss() -> None:
+    perfect_targets = torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]]])
+    perfect_logits = torch.tensor([[[[12.0, -12.0], [-12.0, 12.0]]]])
+    missed_logits = torch.tensor([[[[-12.0, -12.0], [-12.0, -12.0]]]])
+
+    perfect_loss = tversky_loss(perfect_logits, perfect_targets, alpha=0.3, beta=0.7)
+    missed_loss = tversky_loss(missed_logits, perfect_targets, alpha=0.3, beta=0.7)
+
+    assert perfect_loss.ndim == 0
+    assert missed_loss.ndim == 0
+    assert torch.isfinite(perfect_loss)
+    assert torch.isfinite(missed_loss)
+    assert float(perfect_loss) < 1e-3
+    assert float(missed_loss) > float(perfect_loss)
