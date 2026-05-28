@@ -40,3 +40,58 @@ Mục tiêu của file này là lưu mapping giữa claim trong báo cáo và b�
 | Metrics của r005 ghi rõ lịch sử 30 epoch và trạng thái early stopping | `checkpoints/segmenter/seg-unet-attn-r005-long-s42/metrics.json` | json | `early_stopping.triggered = false`, `best_epoch = 29` |
 | Bảng tổng hợp controlled smoke experiments giúp chọn hướng thử tiếp theo | `results/registry/best_runs.md` | markdown | So sánh `r002`, `r003`, `r004`, `r005` trên cùng dataset |
 | LaMa cải thiện chất lượng ảnh | `outputs/figures/report/` | figure | Chưa áp dụng ở giai đoạn này |
+
+## LaMa Prototype Focused Review `n=30`
+
+Bundle focused review được lưu ngoài repo:
+
+- `F:\deeplearning\_kaggle_downloads\lama-proto-r009-focused-review-n30_kaggle_bundle.zip`
+
+Artifact chính:
+
+- `summary_by_mode.csv`
+- `metrics.csv`
+- `grids/`
+
+Summary metric chính:
+
+### `simple_lama pred@0.90 d0`
+
+- `mask_ratio = 0.006065`
+- `psnr = 42.304505`
+- `ssim = 0.995744`
+- `mae = 0.163748`
+- `masked_mae_used = 25.183271`
+- `masked_mae_oracle = 16.719551`
+- `bbox_ssim_used = 0.975841`
+- `bbox_ssim_oracle = 0.962560`
+
+### `simple_lama pred@0.70 d0`
+
+- `mask_ratio = 0.006729`
+- `psnr = 41.382561`
+- `ssim = 0.995261`
+- `mae = 0.182421`
+- `masked_mae_used = 25.400720`
+- `masked_mae_oracle = 17.877089`
+- `bbox_ssim_used = 0.973948`
+- `bbox_ssim_oracle = 0.958931`
+
+### `opencv pred@0.70 d0`
+
+- `mask_ratio = 0.006729`
+- `psnr = 39.557140`
+- `ssim = 0.994169`
+- `mae = 0.227838`
+- `masked_mae_used = 32.144498`
+- `masked_mae_oracle = 19.619183`
+- `bbox_ssim_used = 0.971909`
+- `bbox_ssim_oracle = 0.952920`
+
+Kết luận evidence:
+
+- `simple_lama` là backend chính cho Module 2 prototype.
+- `pred threshold 0.90, dilate 0` là mode metric-best hiện tại.
+- `pred threshold 0.70, dilate 0` giữ vai trò fallback cân bằng coverage.
+- `pred threshold 0.50` chỉ nên dùng cho debug / coverage check.
+- `opencv pred threshold 0.70` chỉ dùng làm baseline sanity check.
