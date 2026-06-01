@@ -16,7 +16,17 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
-MODES = ["auto_r011", "auto_r011_union", "auto_r011_refined", "auto_r011_union_refined"]
+AUTO_MODES = [
+    ("auto_r011", "off"),
+    ("auto_r011_union", "off"),
+    ("auto_r011_refined", "off"),
+    ("auto_r011_union_refined", "off"),
+    ("auto_r011_union_refined_face_auto", "auto"),
+]
+EXTERNAL_MODES = [
+    ("external", "off"),
+    ("external_face_auto", "auto"),
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,8 +83,15 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "mask_refine",
         "final_mask_ratio",
         "actual_backend",
+        "face_mode",
+        "face_module_enabled",
+        "faces_detected",
+        "face_restoration_applied",
+        "face_restoration_backend",
+        "face_reason",
         "output_dir",
         "comparison_grid",
+        "restored_before_face",
         "restored_final",
         "final_mask",
         "overlay_final",
@@ -103,8 +120,15 @@ def mode_row(image_path: Path, mode: str, checkpoint: Path, output_root: Path) -
         "mask_refine": metadata.get("mask_refine", ""),
         "final_mask_ratio": metadata.get("final_mask_ratio", ""),
         "actual_backend": metadata.get("actual_backend", ""),
+        "face_mode": metadata.get("face_mode", ""),
+        "face_module_enabled": metadata.get("face_module_enabled", ""),
+        "faces_detected": metadata.get("faces_detected", ""),
+        "face_restoration_applied": metadata.get("face_restoration_applied", ""),
+        "face_restoration_backend": metadata.get("face_restoration_backend", ""),
+        "face_reason": metadata.get("face_reason", ""),
         "output_dir": str(output_dir),
         "comparison_grid": str(output_dir / "comparison_grid.png") if (output_dir / "comparison_grid.png").exists() else "",
+        "restored_before_face": str(output_dir / "restored_before_face.png") if (output_dir / "restored_before_face.png").exists() else "",
         "restored_final": str(output_dir / "restored_final.png") if (output_dir / "restored_final.png").exists() else "",
         "final_mask": str(output_dir / "final_mask.png") if (output_dir / "final_mask.png").exists() else "",
         "overlay_final": str(output_dir / "overlay_final.png") if (output_dir / "overlay_final.png").exists() else "",
@@ -118,26 +142,29 @@ def write_summary(path: Path, rows: list[dict[str, Any]], checkpoint: Path) -> N
         "",
         "## Mục tiêu",
         "",
-        "Chạy pipeline restoration hiện tại trên bộ demo bằng r011 repair-mask checkpoint và các mode automatic/external.",
+        "Chạy pipeline restoration hiện tại trên bộ demo bằng r011 repair-mask checkpoint, gồm automatic, external-mask và face-auto variants.",
         "",
         f"- Default checkpoint r011: `{checkpoint}`",
         "",
         "## Modes",
         "",
         "- `auto_r011`: baseline automatic, DL repair mask.",
-        "- `auto_r011_union`: DL + CV notebook_v7_candidate, dùng khi CV giúp bắt thêm crack.",
+        "- `auto_r011_union`: DL + CV notebook_v7_candidate.",
         "- `auto_r011_refined`: DL + Module 1.5 refinement.",
-        "- `auto_r011_union_refined`: DL + CV + Module 1.5, enhanced automatic nhưng cần kiểm tra false positive.",
+        "- `auto_r011_union_refined`: DL + CV + Module 1.5.",
+        "- `auto_r011_union_refined_face_auto`: automatic enhanced + Module 3 face auto nếu dependency/adapter sẵn sàng.",
         "- `external`: manual/external mask upper bound, không phải automatic.",
+        "- `external_face_auto`: external mask + Module 3 face auto nếu dependency/adapter sẵn sàng.",
         "",
         "## Demo outputs",
         "",
-        "| demo_id | mode | final_mask_ratio | backend | comparison_grid |",
-        "|---|---|---:|---|---|",
+        "| demo_id | mode | final_mask_ratio | backend | face_mode | face_reason | comparison_grid |",
+        "|---|---|---:|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
-            f"| {row['demo_id']} | {row['mode']} | {row['final_mask_ratio']} | {row['actual_backend']} | `{row['comparison_grid']}` |"
+            f"| {row['demo_id']} | {row['mode']} | {row['final_mask_ratio']} | {row['actual_backend']} | "
+            f"{row['face_mode']} | {row['face_reason']} | `{row['comparison_grid']}` |"
         )
     lines.extend(
         [
@@ -147,7 +174,8 @@ def write_summary(path: Path, rows: list[dict[str, Any]], checkpoint: Path) -> N
             "- `auto_r011` là baseline automatic hiện tại.",
             "- `auto_r011_union` là optional nếu CV giúp bắt thêm crack trong visual review.",
             "- `auto_r011_union_refined` là enhanced automatic nhưng phải kiểm tra false positive.",
-            "- `external` chỉ là upper bound/diagnosis, không phải automatic.",
+            "- Các mode `_face_auto` chỉ thay đổi Module 3; nếu dependency/adapter chưa có, ảnh cuối giữ nguyên và metadata ghi rõ lý do.",
+            "- `external` và `external_face_auto` chỉ là upper bound/diagnosis, không phải automatic.",
             "",
         ]
     )
@@ -168,14 +196,14 @@ def main() -> int:
 
     rows: list[dict[str, Any]] = []
     for image_path in find_demo_images(demo_dir):
-        run_modes = list(MODES)
+        run_modes = list(AUTO_MODES)
         external_mask = external_mask_dir / f"{image_path.stem}_mask.png"
         if external_mask.exists():
-            run_modes.append("external")
+            run_modes.extend(EXTERNAL_MODES)
         else:
             print(f"skip external cho {image_path.name}: thiếu {external_mask}")
 
-        for mode in run_modes:
+        for mode, face_mode in run_modes:
             command = [
                 sys.executable,
                 "scripts\\run_restoration_pipeline.py",
@@ -189,8 +217,10 @@ def main() -> int:
                 str(checkpoint),
                 "--device",
                 args.device,
+                "--face-mode",
+                face_mode,
             ]
-            if mode == "external":
+            if mode.startswith("external"):
                 command.extend(["--external-mask", str(external_mask)])
             run_command(command, f"{image_path.name} {mode}")
             rows.append(mode_row(image_path, mode, checkpoint, output_root))
