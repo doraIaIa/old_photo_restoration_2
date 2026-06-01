@@ -25,6 +25,8 @@ def parse_args() -> argparse.Namespace:
         description="Audit dataset ảnh cũ thật và mask nứt/xước trước khi fine-tune segmentation."
     )
     parser.add_argument("--data-root", required=True, help="Thư mục chứa images/ và masks/.")
+    parser.add_argument("--image-dir", default="images", help="Tên thư mục ảnh trong data-root.")
+    parser.add_argument("--mask-dir", default="masks", help="Tên thư mục mask trong data-root.")
     parser.add_argument("--output-dir", required=True, help="Thư mục ghi audit.csv, summary, preview và split.")
     parser.add_argument("--make-overlays", action="store_true", help="Tạo overlay ảnh gốc + mask đỏ trong suốt.")
     parser.add_argument("--make-splits", action="store_true", help="Tạo train/val/test split từ các pair hợp lệ.")
@@ -348,15 +350,15 @@ def main() -> int:
     args = parse_args()
     data_root = Path(args.data_root).resolve()
     output_dir = Path(args.output_dir).resolve()
-    images_dir = data_root / "images"
-    masks_dir = data_root / "masks"
+    images_dir = data_root / args.image_dir
+    masks_dir = data_root / args.mask_dir
 
     if not data_root.exists():
         raise FileNotFoundError(f"Không tìm thấy data root: {data_root}")
     if not images_dir.exists():
-        raise FileNotFoundError(f"Không tìm thấy thư mục images/: {images_dir}")
+        raise FileNotFoundError(f"Không tìm thấy thư mục {args.image_dir}/: {images_dir}")
     if not masks_dir.exists():
-        raise FileNotFoundError(f"Không tìm thấy thư mục masks/: {masks_dir}")
+        raise FileNotFoundError(f"Không tìm thấy thư mục {args.mask_dir}/: {masks_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     image_count = len(list_files(images_dir, ("*.jpg", "*.jpeg", "*.png")))
