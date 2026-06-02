@@ -22,6 +22,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from src.postprocess.mask_refinement import VALID_REFINE_MODES
 from src.restoration.face_restoration import VALID_FACE_MODES, apply_face_restoration
+from src.restoration.official_lama_adapter import OFFICIAL_LAMA_CHECKPOINT, run_official_lama_subprocess
 
 
 R011_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r011-repair-ft-s42" / "best_iou.ckpt"
@@ -55,8 +56,8 @@ SUPPORTED_RUN_DEMO_BACKENDS = {"auto", "simple_lama", "opencv"}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Entrypoint pipeline restoration cuối kỳ.")
-    parser.add_argument("--image", required=True)
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--image", "--input", dest="image", required=True)
+    parser.add_argument("--output-dir", "--output", dest="output_dir", required=True)
     parser.add_argument("--mode", choices=sorted(MODE_CONFIGS), default="auto_r011_union_refined")
     parser.add_argument("--checkpoint", default="", help="Checkpoint segmentation override. Mặc định theo mode.")
     parser.add_argument("--threshold", type=float, default=0.70)
@@ -65,7 +66,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mask-dilate", type=int, default=0)
     parser.add_argument("--mask-refine", choices=sorted(VALID_REFINE_MODES), default=None)
     parser.add_argument("--external-mask", default="")
-    parser.add_argument("--backend", default="auto", choices=["auto", "simple_lama", "opencv", "fine_tuned_lama"])
+    parser.add_argument(
+        "--backend",
+        "--inpaint-backend",
+        dest="backend",
+        default="auto",
+        choices=["auto", "simple_lama", "opencv", "official_lama", "fine_tuned_lama"],
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--face-mode", choices=sorted(VALID_FACE_MODES), default="auto")
     parser.add_argument("--face-strength", type=float, default=0.5)
@@ -120,6 +127,50 @@ def write_rgb(path: Path, image_rgb: np.ndarray) -> None:
         raise RuntimeError(f"Không ghi được ảnh: {path}")
 
 
+def fit_tile(image_rgb: np.ndarray, size: tuple[int, int] = (420, 420)) -> np.ndarray:
+    target_width, target_height = size
+    height, width = image_rgb.shape[:2]
+    scale = min(target_width / max(width, 1), target_height / max(height, 1))
+    resized = cv2.resize(
+        image_rgb,
+        (max(1, int(width * scale)), max(1, int(height * scale))),
+        interpolation=cv2.INTER_AREA,
+    )
+    canvas = np.full((target_height, target_width, 3), 245, dtype=np.uint8)
+    y = (target_height - resized.shape[0]) // 2
+    x = (target_width - resized.shape[1]) // 2
+    canvas[y : y + resized.shape[0], x : x + resized.shape[1]] = resized
+    return canvas
+
+
+def label_tile(tile_rgb: np.ndarray, label: str) -> np.ndarray:
+    tile = tile_rgb.copy()
+    cv2.rectangle(tile, (0, 0), (tile.shape[1], 36), (20, 20, 20), thickness=-1)
+    cv2.putText(tile, label, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 1, cv2.LINE_AA)
+    return tile
+
+
+def rebuild_pipeline_comparison_grid(final_dir: Path) -> None:
+    items = [
+        ("input", final_dir / "input.png"),
+        ("final mask", final_dir / "final_mask.png"),
+        ("overlay final", final_dir / "overlay_final.png"),
+        ("restored before face", final_dir / "restored_before_face.png"),
+        ("restored final", final_dir / "restored_final.png"),
+    ]
+    tiles: list[np.ndarray] = []
+    for label, path in items:
+        if path.exists():
+            tiles.append(label_tile(fit_tile(read_rgb(path)), label))
+    if not tiles:
+        return
+    blank = label_tile(np.full_like(tiles[0], 245), "")
+    while len(tiles) % 3:
+        tiles.append(blank)
+    grid = np.vstack([np.hstack(tiles[index : index + 3]) for index in range(0, len(tiles), 3)])
+    write_rgb(final_dir / "comparison_grid.png", grid)
+
+
 def run_demo(command: list[str]) -> None:
     print("run_demo:", " ".join(command))
     result = subprocess.run(command, cwd=PROJECT_ROOT, text=True, encoding="utf-8", errors="replace", capture_output=True)
@@ -160,6 +211,8 @@ def main() -> int:
             "fine_tuned_lama chưa có adapter inference trong pipeline hiện tại. "
             "Dùng simple_lama/opencv hoặc chuẩn bị workspace theo docs/LAMA_FINETUNE_ACCELERATION_PLAN.md."
         )
+    requested_backend = args.backend
+    run_demo_backend = "simple_lama" if requested_backend == "official_lama" else requested_backend
 
     mask_source = str(mode_config["mask_source"])
     mask_refine = args.mask_refine if args.mask_refine is not None else str(mode_config["mask_refine"])
@@ -185,7 +238,7 @@ def main() -> int:
         "--fallback-threshold",
         f"{effective_fallback_threshold:.2f}",
         "--backend",
-        args.backend,
+        run_demo_backend,
         "--mask-source",
         mask_source,
         "--cv-profile",
@@ -215,6 +268,22 @@ def main() -> int:
         raise FileNotFoundError(f"Không tìm thấy restored_final từ run_demo: {run_demo_restored}")
     restored_before_face = final_dir / "restored_before_face.png"
     shutil.copy2(run_demo_restored, restored_before_face)
+    official_lama_result: dict[str, Any] | None = None
+    if requested_backend == "official_lama":
+        official_lama_result = run_official_lama_subprocess(
+            final_dir / "input.png",
+            final_dir / "final_mask.png",
+            final_dir / "official_lama_module",
+        )
+        if official_lama_result.get("ok"):
+            official_output = Path(str(official_lama_result["output"]))
+            shutil.copy2(official_output, restored_before_face)
+        else:
+            print(
+                "official_lama_failed_fallback_simple_lama: "
+                f"{official_lama_result.get('reason', 'unknown')}",
+                file=sys.stderr,
+            )
 
     effective_face_mode = "off" if args.skip_face_restoration else args.face_mode
     codeformer_fidelity = args.codeformer_fidelity if args.codeformer_fidelity is not None else args.face_strength
@@ -240,8 +309,23 @@ def main() -> int:
         metadata["warning"] = mode_config.get("warning")
     metadata["pipeline_output_dir"] = str(final_dir)
     metadata["checkpoint_used"] = str(checkpoint_path)
-    metadata["inpainting_backend_requested"] = args.backend
-    metadata["inpainting_backend_actual"] = metadata.get("actual_backend", "")
+    metadata["inpainting_backend_requested"] = requested_backend
+    if requested_backend == "official_lama":
+        metadata["official_lama_result"] = official_lama_result
+        metadata["official_lama_checkpoint"] = str(OFFICIAL_LAMA_CHECKPOINT)
+        metadata["official_lama_device"] = "cpu"
+        metadata["official_lama_reason"] = (official_lama_result or {}).get("reason")
+        metadata["inpainting_backend_actual"] = (
+            "official_lama" if official_lama_result and official_lama_result.get("ok") else "simple_lama"
+        )
+        metadata["actual_backend"] = metadata["inpainting_backend_actual"]
+        metadata["backend_warning"] = (
+            None
+            if official_lama_result and official_lama_result.get("ok")
+            else f"official_lama failed, fallback simple_lama: {(official_lama_result or {}).get('reason')}"
+        )
+    else:
+        metadata["inpainting_backend_actual"] = metadata.get("actual_backend", "")
     metadata["face_mode"] = effective_face_mode
     metadata["face_strength"] = float(args.face_strength)
     metadata["codeformer_fidelity_requested"] = None if args.codeformer_fidelity is None else float(args.codeformer_fidelity)
@@ -261,11 +345,12 @@ def main() -> int:
     metadata["codeformer_result"] = face_metadata.get("codeformer_result")
     metadata["errors_or_warnings"] = build_errors_or_warnings(metadata, face_metadata)
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    rebuild_pipeline_comparison_grid(final_dir)
 
     print(f"image: {image_path}")
     print(f"mode: {args.mode}")
     print(f"checkpoint: {checkpoint_path}")
-    print(f"inpainting_backend_requested: {args.backend}")
+    print(f"inpainting_backend_requested: {requested_backend}")
     print(f"inpainting_backend_actual: {metadata.get('inpainting_backend_actual', '')}")
     print(f"final_mask_ratio: {metadata.get('final_mask_ratio', '')}")
     print(f"face_mode: {effective_face_mode}")
