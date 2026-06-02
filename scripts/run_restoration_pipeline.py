@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -23,15 +24,22 @@ from src.postprocess.mask_refinement import VALID_REFINE_MODES
 from src.restoration.face_restoration import VALID_FACE_MODES, apply_face_restoration
 
 
+R011_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r011-repair-ft-s42" / "best_iou.ckpt"
+R012_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r012-manual-repair-ft-s42" / "best_iou.ckpt"
+
 MODE_CONFIGS = {
-    "auto_r011": {"mask_source": "dl", "mask_refine": "none"},
-    "auto_r011_union": {"mask_source": "union", "mask_refine": "none"},
-    "auto_r011_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative"},
-    "auto_r011_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative"},
-    "auto_r011_union_refined_face_auto": {"mask_source": "union", "mask_refine": "repair_v3_conservative"},
-    "external": {"mask_source": "external", "mask_refine": "none"},
-    "external_face_auto": {"mask_source": "external", "mask_refine": "none"},
+    "auto_r011": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
+    "auto_r011_union": {"mask_source": "union", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
+    "auto_r011_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
+    "auto_r011_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
+    "auto_r011_union_refined_face_auto": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
+    "auto_r012": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R012_CHECKPOINT},
+    "auto_r012_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative", "checkpoint": R012_CHECKPOINT},
+    "auto_r012_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R012_CHECKPOINT},
+    "external": {"mask_source": "external", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
+    "external_face_auto": {"mask_source": "external", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
 }
+SUPPORTED_RUN_DEMO_BACKENDS = {"auto", "simple_lama", "opencv"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,16 +47,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--mode", choices=sorted(MODE_CONFIGS), default="auto_r011_union_refined")
-    parser.add_argument("--checkpoint", default="checkpoints/segmenter/seg-unet-attn-r011-repair-ft-s42/best_iou.ckpt")
+    parser.add_argument("--checkpoint", default="", help="Checkpoint segmentation override. Mặc định theo mode.")
     parser.add_argument("--threshold", type=float, default=0.70)
     parser.add_argument("--fallback-threshold", type=float, default=0.40)
     parser.add_argument("--cv-profile", default="notebook_v7_candidate")
     parser.add_argument("--mask-refine", choices=sorted(VALID_REFINE_MODES), default=None)
     parser.add_argument("--external-mask", default="")
-    parser.add_argument("--backend", default="auto", choices=["auto", "simple_lama", "opencv"])
+    parser.add_argument("--backend", default="auto", choices=["auto", "simple_lama", "opencv", "fine_tuned_lama"])
     parser.add_argument("--device", default="auto")
     parser.add_argument("--face-mode", choices=sorted(VALID_FACE_MODES), default="auto")
     parser.add_argument("--face-strength", type=float, default=0.5)
+    parser.add_argument("--codeformer-fidelity", type=float, default=None)
     parser.add_argument("--skip-face-restoration", action="store_true")
     parser.add_argument("--save-all-masks", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
@@ -57,6 +66,12 @@ def parse_args() -> argparse.Namespace:
 def resolve_path(path_text: str) -> Path:
     path = Path(path_text)
     return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+
+def resolve_checkpoint(args: argparse.Namespace, mode_config: dict[str, Any]) -> Path:
+    if args.checkpoint:
+        return resolve_path(args.checkpoint)
+    return Path(mode_config["checkpoint"]).resolve()
 
 
 def copy_required_outputs(source_dir: Path, target_dir: Path) -> None:
@@ -104,19 +119,38 @@ def run_demo(command: list[str]) -> None:
         raise RuntimeError(f"run_demo.py lỗi với exit code {result.returncode}")
 
 
+def build_errors_or_warnings(metadata: dict[str, Any], face_metadata: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for key in ["backend_warning", "inpaint_failed", "face_warning"]:
+        value = metadata.get(key)
+        if value:
+            warnings.append(str(value))
+    face_reason = str(face_metadata.get("reason", ""))
+    if face_reason in {"dependency_not_available", "adapter_not_configured"}:
+        warnings.append(f"face_restoration: {face_reason}")
+    return warnings
+
+
 def main() -> int:
     args = parse_args()
     image_path = resolve_path(args.image)
-    checkpoint_path = resolve_path(args.checkpoint)
     output_root = resolve_path(args.output_dir)
     if not image_path.exists():
         raise FileNotFoundError(f"Không tìm thấy image: {image_path}")
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Không tìm thấy checkpoint: {checkpoint_path}")
 
     mode_config = MODE_CONFIGS[args.mode]
-    mask_source = mode_config["mask_source"]
-    mask_refine = args.mask_refine if args.mask_refine is not None else mode_config["mask_refine"]
+    checkpoint_path = resolve_checkpoint(args, mode_config)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Không tìm thấy checkpoint cho mode {args.mode}: {checkpoint_path}")
+
+    if args.backend == "fine_tuned_lama":
+        raise RuntimeError(
+            "fine_tuned_lama chưa có adapter inference trong pipeline hiện tại. "
+            "Dùng simple_lama/opencv hoặc chuẩn bị workspace theo docs/LAMA_FINETUNE_ACCELERATION_PLAN.md."
+        )
+
+    mask_source = str(mode_config["mask_source"])
+    mask_refine = args.mask_refine if args.mask_refine is not None else str(mode_config["mask_refine"])
     if mask_source == "external" and not args.external_mask:
         raise ValueError("Mode external yêu cầu --external-mask.")
     external_mask_path = resolve_path(args.external_mask) if args.external_mask else None
@@ -168,23 +202,29 @@ def main() -> int:
     shutil.copy2(run_demo_restored, restored_before_face)
 
     effective_face_mode = "off" if args.skip_face_restoration else args.face_mode
+    codeformer_fidelity = args.codeformer_fidelity if args.codeformer_fidelity is not None else args.face_strength
     face_restored_rgb, face_metadata = apply_face_restoration(
         read_rgb(restored_before_face),
         mode=effective_face_mode,
-        strength=args.face_strength,
+        strength=codeformer_fidelity,
         output_dir=final_dir / "face_module",
     )
     restored_final = final_dir / "restored_final.png"
     write_rgb(restored_final, face_restored_rgb)
 
     metadata_path = final_dir / "metadata.json"
-    metadata = {}
+    metadata: dict[str, Any] = {}
     if metadata_path.exists():
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata["pipeline_mode"] = args.mode
+    metadata["mask_mode"] = args.mode
     metadata["pipeline_output_dir"] = str(final_dir)
+    metadata["checkpoint_used"] = str(checkpoint_path)
+    metadata["inpainting_backend_requested"] = args.backend
+    metadata["inpainting_backend_actual"] = metadata.get("actual_backend", "")
     metadata["face_mode"] = effective_face_mode
     metadata["face_strength"] = float(args.face_strength)
+    metadata["codeformer_fidelity_requested"] = None if args.codeformer_fidelity is None else float(args.codeformer_fidelity)
     metadata["restored_before_face_path"] = str(restored_before_face)
     metadata["restored_final_path"] = str(restored_final)
     metadata["face_module_enabled"] = face_metadata.get("face_module_enabled", False)
@@ -192,14 +232,21 @@ def main() -> int:
     metadata["faces_detected"] = face_metadata.get("faces_detected", 0)
     metadata["face_restoration_applied"] = face_metadata.get("face_restoration_applied", False)
     metadata["face_restoration_backend"] = face_metadata.get("face_restoration_backend", "none")
+    metadata["face_backend"] = face_metadata.get("face_restoration_backend", "none")
     metadata["face_reason"] = face_metadata.get("reason", "")
+    metadata["face_restore_reason"] = face_metadata.get("reason", "")
     metadata["face_warning"] = face_metadata.get("warning")
+    metadata["codeformer_fidelity"] = face_metadata.get("codeformer_fidelity")
+    metadata["codeformer_output"] = face_metadata.get("codeformer_output")
+    metadata["codeformer_result"] = face_metadata.get("codeformer_result")
+    metadata["errors_or_warnings"] = build_errors_or_warnings(metadata, face_metadata)
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"image: {image_path}")
     print(f"mode: {args.mode}")
     print(f"checkpoint: {checkpoint_path}")
-    print(f"actual_backend: {metadata.get('actual_backend', '')}")
+    print(f"inpainting_backend_requested: {args.backend}")
+    print(f"inpainting_backend_actual: {metadata.get('inpainting_backend_actual', '')}")
     print(f"final_mask_ratio: {metadata.get('final_mask_ratio', '')}")
     print(f"face_mode: {effective_face_mode}")
     print(f"face_restoration_applied: {metadata.get('face_restoration_applied', False)}")

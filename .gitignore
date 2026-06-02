@@ -163,6 +163,8 @@ checkpoints/
 outputs/
 experiments/
 wandb/
+weights/
+external_models/
 temp_crackforest/
 CrackForest-dataset/
 DeepCrack/

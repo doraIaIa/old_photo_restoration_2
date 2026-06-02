@@ -82,13 +82,15 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "cv_profile",
         "mask_refine",
         "final_mask_ratio",
-        "actual_backend",
+        "inpainting_backend_requested",
+        "inpainting_backend_actual",
         "face_mode",
         "face_module_enabled",
         "faces_detected",
         "face_restoration_applied",
-        "face_restoration_backend",
+        "face_backend",
         "face_reason",
+        "errors_or_warnings",
         "output_dir",
         "comparison_grid",
         "restored_before_face",
@@ -119,13 +121,15 @@ def mode_row(image_path: Path, mode: str, checkpoint: Path, output_root: Path) -
         "cv_profile": metadata.get("cv_profile", ""),
         "mask_refine": metadata.get("mask_refine", ""),
         "final_mask_ratio": metadata.get("final_mask_ratio", ""),
-        "actual_backend": metadata.get("actual_backend", ""),
+        "inpainting_backend_requested": metadata.get("inpainting_backend_requested", metadata.get("backend_requested", "")),
+        "inpainting_backend_actual": metadata.get("inpainting_backend_actual", metadata.get("actual_backend", "")),
         "face_mode": metadata.get("face_mode", ""),
         "face_module_enabled": metadata.get("face_module_enabled", ""),
         "faces_detected": metadata.get("faces_detected", ""),
         "face_restoration_applied": metadata.get("face_restoration_applied", ""),
-        "face_restoration_backend": metadata.get("face_restoration_backend", ""),
+        "face_backend": metadata.get("face_backend", metadata.get("face_restoration_backend", "")),
         "face_reason": metadata.get("face_reason", ""),
+        "errors_or_warnings": "; ".join(str(item) for item in metadata.get("errors_or_warnings", [])),
         "output_dir": str(output_dir),
         "comparison_grid": str(output_dir / "comparison_grid.png") if (output_dir / "comparison_grid.png").exists() else "",
         "restored_before_face": str(output_dir / "restored_before_face.png") if (output_dir / "restored_before_face.png").exists() else "",
@@ -158,12 +162,12 @@ def write_summary(path: Path, rows: list[dict[str, Any]], checkpoint: Path) -> N
         "",
         "## Demo outputs",
         "",
-        "| demo_id | mode | final_mask_ratio | backend | face_mode | face_reason | comparison_grid |",
+        "| demo_id | mode | final_mask_ratio | inpaint_backend | face_mode | face_reason | comparison_grid |",
         "|---|---|---:|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
-            f"| {row['demo_id']} | {row['mode']} | {row['final_mask_ratio']} | {row['actual_backend']} | "
+            f"| {row['demo_id']} | {row['mode']} | {row['final_mask_ratio']} | {row['inpainting_backend_actual']} | "
             f"{row['face_mode']} | {row['face_reason']} | `{row['comparison_grid']}` |"
         )
     lines.extend(
