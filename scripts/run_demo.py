@@ -24,6 +24,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from src.data.transforms import get_segmentation_transforms
 from src.models.segmenter import CrackSegmenter
 from src.postprocess.mask_refinement import VALID_REFINE_MODES, refine_mask
+from src.restoration.dependency_checks import check_simple_lama_available
 
 
 def parse_args() -> argparse.Namespace:
@@ -577,7 +578,10 @@ def resolve_inpaint_backend(backend_arg: str) -> tuple[str, str | None, Any | No
     if backend_arg == "opencv":
         return "opencv", None, None
     if backend_arg == "simple_lama":
-        return "simple_lama", None, try_create_simple_lama()
+        try:
+            return "simple_lama", None, try_create_simple_lama()
+        except ImportError as exc:
+            return "opencv", f"simple_lama unavailable, fallback opencv: {exc}", None
     try:
         return "simple_lama", None, try_create_simple_lama()
     except ImportError as exc:
@@ -736,6 +740,7 @@ def main() -> int:
     backend_warning: str | None = None
     inpaint_failed: str | None = None
     actual_backend = "none" if args.no_inpaint else ""
+    simple_lama_status = check_simple_lama_available()
     restored_final: np.ndarray | None = None
     restored_primary: np.ndarray | None = None
     restored_fallback: np.ndarray | None = None
@@ -825,6 +830,11 @@ def main() -> int:
         "backend_requested": args.backend,
         "actual_backend": actual_backend,
         "backend_warning": backend_warning,
+        "fallback_applied": bool(args.backend == "simple_lama" and actual_backend == "opencv"),
+        "fallback_chain": [args.backend, "opencv"] if args.backend == "simple_lama" and actual_backend == "opencv" else [args.backend],
+        "simple_lama_available": bool(simple_lama_status.get("available")),
+        "simple_lama_reason": simple_lama_status.get("reason"),
+        "simple_lama_detail": simple_lama_status.get("detail"),
         "image_size_original": {"width": int(original_width), "height": int(original_height)},
         "image_size_model": int(effective_image_size),
         "dl_mask_ratio": mask_ratio(dl_mask_primary),

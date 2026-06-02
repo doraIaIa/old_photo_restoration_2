@@ -21,6 +21,11 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from src.postprocess.mask_refinement import VALID_REFINE_MODES
+from src.restoration.dependency_checks import (
+    check_official_lama_available,
+    check_opencv_available,
+    check_simple_lama_available,
+)
 from src.restoration.face_restoration import VALID_FACE_MODES, apply_face_restoration
 from src.restoration.official_lama_adapter import OFFICIAL_LAMA_CHECKPOINT, run_official_lama_subprocess
 
@@ -194,6 +199,70 @@ def build_errors_or_warnings(metadata: dict[str, Any], face_metadata: dict[str, 
     return warnings
 
 
+def resolve_safe_inpaint_backend(requested_backend: str) -> tuple[str, dict[str, Any]]:
+    simple_lama_status = check_simple_lama_available()
+    opencv_status = check_opencv_available()
+    official_lama_status = check_official_lama_available() if requested_backend == "official_lama" else {}
+    if not opencv_status.get("available"):
+        raise RuntimeError(f"OpenCV không khả dụng để làm fallback: {opencv_status.get('reason')}")
+
+    fallback_info: dict[str, Any] = {
+        "simple_lama_status": simple_lama_status,
+        "opencv_status": opencv_status,
+        "official_lama_status": official_lama_status,
+        "run_demo_backend": requested_backend,
+        "fallback_backend": requested_backend,
+        "fallback_applied": False,
+        "fallback_chain": [requested_backend],
+        "backend_warning": None,
+    }
+
+    if requested_backend in {"auto", "opencv"}:
+        return requested_backend, fallback_info
+
+    if requested_backend == "simple_lama":
+        if simple_lama_status.get("available"):
+            return "simple_lama", fallback_info
+        fallback_info.update(
+            {
+                "run_demo_backend": "opencv",
+                "fallback_backend": "opencv",
+                "fallback_applied": True,
+                "fallback_chain": ["simple_lama", "opencv"],
+                "backend_warning": (
+                    "simple_lama unavailable, fallback opencv: "
+                    f"{simple_lama_status.get('reason', 'unknown')}"
+                ),
+            }
+        )
+        return "opencv", fallback_info
+
+    if requested_backend == "official_lama":
+        if simple_lama_status.get("available"):
+            fallback_info.update(
+                {
+                    "run_demo_backend": "simple_lama",
+                    "fallback_backend": "simple_lama",
+                    "fallback_chain": ["official_lama", "simple_lama"],
+                }
+            )
+            return "simple_lama", fallback_info
+        fallback_info.update(
+            {
+                "run_demo_backend": "opencv",
+                "fallback_backend": "opencv",
+                "fallback_chain": ["official_lama", "simple_lama", "opencv"],
+                "backend_warning": (
+                    "simple_lama unavailable before official_lama fallback chain: "
+                    f"{simple_lama_status.get('reason', 'unknown')}"
+                ),
+            }
+        )
+        return "opencv", fallback_info
+
+    return requested_backend, fallback_info
+
+
 def main() -> int:
     args = parse_args()
     image_path = resolve_path(args.image)
@@ -212,7 +281,7 @@ def main() -> int:
             "Dùng simple_lama/opencv hoặc chuẩn bị workspace theo docs/LAMA_FINETUNE_ACCELERATION_PLAN.md."
         )
     requested_backend = args.backend
-    run_demo_backend = "simple_lama" if requested_backend == "official_lama" else requested_backend
+    run_demo_backend, fallback_info = resolve_safe_inpaint_backend(requested_backend)
 
     mask_source = str(mode_config["mask_source"])
     mask_refine = args.mask_refine if args.mask_refine is not None else str(mode_config["mask_refine"])
@@ -269,6 +338,10 @@ def main() -> int:
     restored_before_face = final_dir / "restored_before_face.png"
     shutil.copy2(run_demo_restored, restored_before_face)
     official_lama_result: dict[str, Any] | None = None
+    actual_backend = str(fallback_info.get("fallback_backend", run_demo_backend))
+    fallback_applied = bool(fallback_info.get("fallback_applied", False))
+    fallback_chain = list(fallback_info.get("fallback_chain", [requested_backend]))
+    backend_warning = fallback_info.get("backend_warning")
     if requested_backend == "official_lama":
         official_lama_result = run_official_lama_subprocess(
             final_dir / "input.png",
@@ -278,9 +351,21 @@ def main() -> int:
         if official_lama_result.get("ok"):
             official_output = Path(str(official_lama_result["output"]))
             shutil.copy2(official_output, restored_before_face)
+            actual_backend = "official_lama"
+            fallback_applied = False
+            fallback_chain = ["official_lama"]
+            backend_warning = None
         else:
+            actual_backend = str(fallback_info.get("fallback_backend", run_demo_backend))
+            fallback_applied = True
+            if "official_lama" not in fallback_chain:
+                fallback_chain.insert(0, "official_lama")
+            backend_warning = (
+                f"official_lama failed, fallback {actual_backend}: "
+                f"{official_lama_result.get('reason', 'unknown')}"
+            )
             print(
-                "official_lama_failed_fallback_simple_lama: "
+                f"official_lama_failed_fallback_{actual_backend}: "
                 f"{official_lama_result.get('reason', 'unknown')}",
                 file=sys.stderr,
             )
@@ -300,6 +385,14 @@ def main() -> int:
     metadata: dict[str, Any] = {}
     if metadata_path.exists():
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if requested_backend != "official_lama":
+        actual_backend = str(metadata.get("actual_backend") or actual_backend)
+        if requested_backend == "simple_lama" and actual_backend != "simple_lama":
+            fallback_applied = True
+            fallback_chain = ["simple_lama", actual_backend]
+            backend_warning = backend_warning or metadata.get("backend_warning")
+        elif requested_backend == "auto":
+            fallback_chain = ["auto", actual_backend]
     metadata["pipeline_mode"] = args.mode
     metadata["mask_mode"] = args.mode
     metadata["experimental"] = bool(mode_config.get("experimental", False))
@@ -310,22 +403,36 @@ def main() -> int:
     metadata["pipeline_output_dir"] = str(final_dir)
     metadata["checkpoint_used"] = str(checkpoint_path)
     metadata["inpainting_backend_requested"] = requested_backend
+    metadata["inpainting_backend_actual"] = actual_backend
+    metadata["actual_backend"] = actual_backend
+    metadata["fallback_applied"] = bool(fallback_applied)
+    metadata["fallback_chain"] = fallback_chain
+    metadata["simple_lama_available"] = bool(fallback_info["simple_lama_status"].get("available"))
+    metadata["simple_lama_reason"] = fallback_info["simple_lama_status"].get("reason")
+    metadata["simple_lama_detail"] = fallback_info["simple_lama_status"].get("detail")
+    metadata["opencv_available"] = bool(fallback_info["opencv_status"].get("available"))
+    metadata["opencv_reason"] = fallback_info["opencv_status"].get("reason")
     if requested_backend == "official_lama":
+        metadata["official_lama_available"] = bool(fallback_info.get("official_lama_status", {}).get("available"))
+        metadata["official_lama_status"] = fallback_info.get("official_lama_status")
         metadata["official_lama_result"] = official_lama_result
         metadata["official_lama_checkpoint"] = str(OFFICIAL_LAMA_CHECKPOINT)
-        metadata["official_lama_device"] = "cpu"
-        metadata["official_lama_reason"] = (official_lama_result or {}).get("reason")
-        metadata["inpainting_backend_actual"] = (
-            "official_lama" if official_lama_result and official_lama_result.get("ok") else "simple_lama"
+        metadata["official_lama_env_requested"] = (official_lama_result or {}).get("official_lama_env_requested")
+        metadata["official_lama_env_actual"] = (official_lama_result or {}).get("official_lama_env_actual")
+        metadata["official_lama_device_requested"] = (official_lama_result or {}).get("official_lama_device_requested")
+        metadata["official_lama_device_actual"] = (official_lama_result or {}).get("official_lama_device_actual")
+        metadata["official_lama_device"] = (official_lama_result or {}).get("official_lama_device_actual")
+        metadata["official_lama_cuda_available"] = (official_lama_result or {}).get("official_lama_cuda_available")
+        metadata["official_lama_torch_version"] = (official_lama_result or {}).get("official_lama_torch_version")
+        metadata["official_lama_cuda_build"] = (official_lama_result or {}).get("official_lama_cuda_build")
+        metadata["official_lama_reason"] = (official_lama_result or {}).get(
+            "reason",
+            fallback_info.get("official_lama_status", {}).get("reason"),
         )
-        metadata["actual_backend"] = metadata["inpainting_backend_actual"]
-        metadata["backend_warning"] = (
-            None
-            if official_lama_result and official_lama_result.get("ok")
-            else f"official_lama failed, fallback simple_lama: {(official_lama_result or {}).get('reason')}"
-        )
-    else:
-        metadata["inpainting_backend_actual"] = metadata.get("actual_backend", "")
+    if backend_warning:
+        metadata["backend_warning"] = backend_warning
+    elif metadata.get("backend_warning") and not fallback_applied:
+        metadata["backend_warning"] = None
     metadata["face_mode"] = effective_face_mode
     metadata["face_strength"] = float(args.face_strength)
     metadata["codeformer_fidelity_requested"] = None if args.codeformer_fidelity is None else float(args.codeformer_fidelity)

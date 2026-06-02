@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import importlib.util
 import subprocess
 import sys
 import time
@@ -12,6 +11,11 @@ import cv2
 import numpy as np
 
 from src.restoration.codeformer_adapter import CODEFORMER_REPO
+from src.restoration.dependency_checks import (
+    check_official_lama_available,
+    check_opencv_available,
+    check_simple_lama_available,
+)
 from src.restoration.official_lama_adapter import OFFICIAL_LAMA_CHECKPOINT, OFFICIAL_LAMA_ENV, OFFICIAL_LAMA_REPO
 
 
@@ -72,9 +76,16 @@ def available_backends() -> list[str]:
 
 
 def get_system_readiness() -> dict:
-    simple_lama_available = importlib.util.find_spec("simple_lama_inpainting") is not None
-    official_lama_available = OFFICIAL_LAMA_REPO.exists() and OFFICIAL_LAMA_CHECKPOINT.exists()
+    simple_lama_status = check_simple_lama_available()
+    official_lama_status = check_official_lama_available()
+    opencv_status = check_opencv_available()
     codeformer_available = CODEFORMER_REPO.exists()
+    if simple_lama_status.get("available"):
+        fallback_recommendation = "auto_r011_union_refined + simple_lama"
+    elif official_lama_status.get("available"):
+        fallback_recommendation = "auto_r011_union_refined + official_lama"
+    else:
+        fallback_recommendation = "auto_r011_union_refined + opencv"
     return {
         "segmentation": {
             "r011": "available" if R011_CHECKPOINT.exists() else "missing",
@@ -82,17 +93,32 @@ def get_system_readiness() -> dict:
             "sensitive_mode": "available",
         },
         "inpainting": {
-            "simple_lama": "available" if simple_lama_available else "unavailable",
-            "official_lama": "cpu-only" if official_lama_available else "unavailable",
+            "simple_lama": "available" if simple_lama_status.get("available") else "unavailable",
+            "simple_lama_reason": simple_lama_status.get("detail") or simple_lama_status.get("reason"),
+            "official_lama": official_lama_status.get("status", "unavailable"),
+            "official_lama_reason": official_lama_status.get("detail") or official_lama_status.get("reason"),
+            "official_lama_gpu": (
+                "available"
+                if official_lama_status.get("gpu_probe", {}).get("cuda_available")
+                else "unavailable"
+            ),
+            "official_lama_cpu": (
+                "available"
+                if official_lama_status.get("cpu_probe", {}).get("available") or official_lama_status.get("device") == "cpu"
+                else "unavailable"
+            ),
+            "official_lama_selected_env": official_lama_status.get("selected_env") or official_lama_status.get("env"),
+            "official_lama_selected_device": official_lama_status.get("selected_device") or official_lama_status.get("device"),
             "official_lama_env": OFFICIAL_LAMA_ENV,
-            "opencv": "available",
+            "opencv": "available" if opencv_status.get("available") else "unavailable",
+            "opencv_reason": opencv_status.get("detail") or opencv_status.get("reason"),
         },
         "face_restoration": {
             "CodeFormer": "available" if codeformer_available else "unavailable",
         },
         "current_recommendation": {
             "demo3": "auto_r011_sensitive_low_threshold + official_lama + CodeFormer 0.7",
-            "fallback": "auto_r011_union_refined + simple_lama",
+            "fallback": fallback_recommendation,
         },
     }
 
@@ -105,9 +131,13 @@ def format_system_readiness() -> str:
         f"  r012: {readiness['segmentation']['r012']}\n"
         f"  sensitive mode: {readiness['segmentation']['sensitive_mode']}\n\n"
         "Inpainting:\n"
-        f"  simple_lama: {readiness['inpainting']['simple_lama']}\n"
-        f"  official_lama: {readiness['inpainting']['official_lama']}\n"
-        f"  opencv: {readiness['inpainting']['opencv']}\n\n"
+        f"  simple_lama: {readiness['inpainting']['simple_lama']} — {readiness['inpainting']['simple_lama_reason']}\n"
+        f"  official_lama: {readiness['inpainting']['official_lama']} — {readiness['inpainting']['official_lama_reason']}\n"
+        f"  official_lama_gpu: {readiness['inpainting']['official_lama_gpu']}\n"
+        f"  official_lama_cpu: {readiness['inpainting']['official_lama_cpu']}\n"
+        f"  selected official_lama env: {readiness['inpainting']['official_lama_selected_env']}\n"
+        f"  selected official_lama device: {readiness['inpainting']['official_lama_selected_device']}\n"
+        f"  opencv: {readiness['inpainting']['opencv']} — {readiness['inpainting']['opencv_reason']}\n\n"
         "Face Restoration:\n"
         f"  CodeFormer: {readiness['face_restoration']['CodeFormer']}\n\n"
         "Current recommendation:\n"
@@ -187,6 +217,10 @@ def _normalize_metadata(
     output["mask_mode"] = mode
     output["inpainting_backend_requested"] = backend
     output["inpainting_backend_actual"] = output.get("inpainting_backend_actual") or output.get("actual_backend")
+    output["fallback_applied"] = bool(output.get("fallback_applied", output["inpainting_backend_actual"] != backend))
+    output["fallback_chain"] = output.get("fallback_chain") or [backend]
+    output["simple_lama_available"] = bool(output.get("simple_lama_available", False))
+    output["simple_lama_reason"] = output.get("simple_lama_reason", "unknown")
     output["face_restoration_requested"] = face_mode != "off"
     output["face_restoration_applied"] = bool(output.get("face_restoration_applied", False))
     output["face_backend"] = output.get("face_backend", "none")
@@ -199,6 +233,9 @@ def _normalize_metadata(
         output["official_lama_device"] = output.get("official_lama_device", "cpu")
         output["official_lama_reason"] = output.get("official_lama_reason", "unknown")
         output["fallback_applied"] = output.get("inpainting_backend_actual") != "official_lama"
+    elif backend == "simple_lama" and output.get("inpainting_backend_actual") == "opencv":
+        output["fallback_applied"] = True
+        output["fallback_chain"] = output.get("fallback_chain") or ["simple_lama", "opencv"]
     return output
 
 
@@ -316,8 +353,9 @@ def run_restoration(
         metadata_payload = error_payload
         if gr is not None:
             gr.Warning("Pipeline failed; xem metadata để biết chi tiết.")
-    if backend == "official_lama" and metadata_payload.get("inpainting_backend_actual") == "simple_lama":
-        warnings.append("official_lama fail, đã fallback sang simple_lama.")
+    actual_backend = metadata_payload.get("inpainting_backend_actual")
+    if backend != actual_backend and actual_backend:
+        warnings.append(f"{backend} không chạy được, đã fallback sang {actual_backend}.")
     metadata_payload.update(external_metadata)
 
     final_mask = str(output_dir / "final_mask.png") if (output_dir / "final_mask.png").exists() else None

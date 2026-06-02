@@ -11,9 +11,14 @@
 ## Module 2 — Inpainting
 
 - `simple_lama` is the stable fallback backend.
+- `simple_lama` availability can differ by runtime: it is available in the default project Python but unavailable in the Gradio venv used during fallback testing.
+- If `simple_lama` is unavailable, the pipeline falls back to `opencv` and records `fallback_applied=true`, `fallback_chain=["simple_lama", "opencv"]`, and `simple_lama_reason=module_not_found`.
 - `opencv` is the classical fallback backend.
-- `official_lama_pretrained` is runnable through a subprocess adapter in conda env `lama`.
-- Official LaMa currently runs on local CPU, so it can be slower than `simple_lama`.
+- `official_lama_pretrained` is runnable through a subprocess adapter.
+- GPU env `lama_gpu` has been prepared as an optional official LaMa runtime. The adapter now probes `lama_gpu` first and selects CUDA when `torch.cuda.is_available()` is true, while preserving CPU env `lama` as retry/fallback.
+- If official LaMa GPU inference fails, the adapter retries with CPU env `lama` before the outer pipeline falls back to `simple_lama` or `opencv`.
+- Latest GPU smoke on `demo3` records `official_lama_env_actual=lama_gpu`, `official_lama_device_actual=cuda`, `official_lama_torch_version=2.4.1+cu121`, and `official_lama_cuda_available=true`.
+- Single-image timing did not show a speedup yet: GPU attempt was about 44.15s and CPU direct attempt was about 38.51s for the same demo3 input/mask. Treat GPU as available but not proven faster until broader timing is run.
 - LaMa fine-tune has not been performed.
 
 ## Module 3 — Face Restoration
@@ -32,7 +37,7 @@
 
 ## Limitations
 
-- Official LaMa is CPU-only in the current local setup.
+- Official LaMa GPU is available in env `lama_gpu`, but speedup is not established from the current one-image smoke test.
 - LaMa fine-tune has not been performed.
 - Broader real-photo test coverage is still needed.
 - LPIPS, FID, and masked-region metrics have not been measured.
