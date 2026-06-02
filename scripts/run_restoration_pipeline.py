@@ -33,6 +33,17 @@ MODE_CONFIGS = {
     "auto_r011_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
     "auto_r011_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
     "auto_r011_union_refined_face_auto": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
+    "auto_r011_sensitive_low_threshold": {
+        "mask_source": "dl",
+        "mask_refine": "close_dilate1",
+        "checkpoint": R011_CHECKPOINT,
+        "threshold": 0.15,
+        "fallback_threshold": 0.15,
+        "mask_dilate": 0,
+        "experimental": True,
+        "warning": "Recall-sensitive mask may increase false positives.",
+        "original_baseline": "auto_r011_union_refined",
+    },
     "auto_r012": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R012_CHECKPOINT},
     "auto_r012_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative", "checkpoint": R012_CHECKPOINT},
     "auto_r012_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R012_CHECKPOINT},
@@ -152,6 +163,9 @@ def main() -> int:
 
     mask_source = str(mode_config["mask_source"])
     mask_refine = args.mask_refine if args.mask_refine is not None else str(mode_config["mask_refine"])
+    effective_threshold = float(mode_config.get("threshold", args.threshold))
+    effective_fallback_threshold = float(mode_config.get("fallback_threshold", args.fallback_threshold))
+    effective_mask_dilate = int(mode_config.get("mask_dilate", args.mask_dilate))
     if mask_source == "external" and not args.external_mask:
         raise ValueError("Mode external yêu cầu --external-mask.")
     external_mask_path = resolve_path(args.external_mask) if args.external_mask else None
@@ -167,9 +181,9 @@ def main() -> int:
         "--checkpoint",
         str(checkpoint_path),
         "--threshold",
-        f"{args.threshold:.2f}",
+        f"{effective_threshold:.2f}",
         "--fallback-threshold",
-        f"{args.fallback_threshold:.2f}",
+        f"{effective_fallback_threshold:.2f}",
         "--backend",
         args.backend,
         "--mask-source",
@@ -177,7 +191,7 @@ def main() -> int:
         "--cv-profile",
         args.cv_profile,
         "--mask-dilate",
-        str(args.mask_dilate),
+        str(effective_mask_dilate),
         "--mask-refine",
         mask_refine,
         "--output-dir",
@@ -219,6 +233,11 @@ def main() -> int:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata["pipeline_mode"] = args.mode
     metadata["mask_mode"] = args.mode
+    metadata["experimental"] = bool(mode_config.get("experimental", False))
+    if mode_config.get("experimental"):
+        metadata["low_threshold"] = effective_threshold
+        metadata["original_baseline"] = mode_config.get("original_baseline")
+        metadata["warning"] = mode_config.get("warning")
     metadata["pipeline_output_dir"] = str(final_dir)
     metadata["checkpoint_used"] = str(checkpoint_path)
     metadata["inpainting_backend_requested"] = args.backend
