@@ -51,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.70)
     parser.add_argument("--fallback-threshold", type=float, default=0.40)
     parser.add_argument("--cv-profile", default="notebook_v7_candidate")
+    parser.add_argument("--mask-dilate", type=int, default=0)
     parser.add_argument("--mask-refine", choices=sorted(VALID_REFINE_MODES), default=None)
     parser.add_argument("--external-mask", default="")
     parser.add_argument("--backend", default="auto", choices=["auto", "simple_lama", "opencv", "fine_tuned_lama"])
@@ -176,7 +177,7 @@ def main() -> int:
         "--cv-profile",
         args.cv_profile,
         "--mask-dilate",
-        "0",
+        str(args.mask_dilate),
         "--mask-refine",
         mask_refine,
         "--output-dir",
