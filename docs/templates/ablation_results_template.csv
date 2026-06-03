@@ -1,0 +1,2 @@
+image_id,case_id,mask_mode,backend_actual,face_restoration,codeformer_fidelity,fallback_applied,mask_ratio,runtime_seconds,reviewer_score_1_5,notes
+demo1,A_opencv_fallback_baseline,auto_r011_union_refined,opencv,off,,,,,,

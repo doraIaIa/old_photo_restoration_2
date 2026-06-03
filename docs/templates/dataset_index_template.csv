@@ -1,0 +1,2 @@
+image_id,filename,split,source,has_manual_mask,mask_path,has_face,damage_level,damage_type,hard_negative_type,notes
+demo1,demo1.jpg,demo,existing_demo,,,,,,,

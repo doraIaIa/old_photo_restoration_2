@@ -1,0 +1,2 @@
+image_id,config_name,mask_mode,backend_requested,backend_actual,fallback_applied,mask_ratio,face_restoration,codeformer_fidelity,status,mask_error,inpainting_error,codeformer_error,overall_quality_1_5,notes
+demo1,r011_default,auto_r011_union_refined,official_lama,,,,off,,pending,,,,,
