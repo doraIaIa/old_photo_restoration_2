@@ -16,6 +16,7 @@ VALID_REFINE_MODES = {
     "repair_v1",
     "repair_v2",
     "repair_v3_conservative",
+    "repair_wide_v1",
 }
 
 
@@ -52,6 +53,19 @@ def remove_small_components(mask: np.ndarray, min_area: int) -> np.ndarray:
     for label_index in range(1, num_labels):
         area = int(stats[label_index, cv2.CC_STAT_AREA])
         if area >= min_area:
+            kept[labels == label_index] = 1
+    return kept.astype(np.uint8) * 255
+
+
+def remove_small_components_keep_long(mask: np.ndarray, min_area: int, min_span: int) -> np.ndarray:
+    binary = (ensure_binary_mask(mask) > 0).astype(np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    kept = np.zeros_like(binary)
+    for label_index in range(1, num_labels):
+        area = int(stats[label_index, cv2.CC_STAT_AREA])
+        width = int(stats[label_index, cv2.CC_STAT_WIDTH])
+        height = int(stats[label_index, cv2.CC_STAT_HEIGHT])
+        if area >= min_area or max(width, height) >= min_span:
             kept[labels == label_index] = 1
     return kept.astype(np.uint8) * 255
 
@@ -121,6 +135,13 @@ def refine_mask(mask: np.ndarray, mode: str) -> np.ndarray:
         repaired = remove_small_components(binary, min_area=12)
         repaired = bridge_line_gaps(repaired, kernel_len=5, iterations=1)
         repaired = cv2.dilate(repaired, ellipse3, iterations=1)
+        return ensure_binary_mask(repaired)
+    if mode == "repair_wide_v1":
+        repaired = remove_small_components_keep_long(binary, min_area=8, min_span=24)
+        repaired = bridge_line_gaps(repaired, kernel_len=9, iterations=1)
+        repaired = cv2.morphologyEx(repaired, cv2.MORPH_CLOSE, square3, iterations=1)
+        repaired = cv2.dilate(repaired, ellipse3, iterations=1)
+        repaired = cv2.morphologyEx(repaired, cv2.MORPH_CLOSE, square3, iterations=1)
         return ensure_binary_mask(repaired)
     raise AssertionError(f"mode chưa được xử lý: {mode}")
 

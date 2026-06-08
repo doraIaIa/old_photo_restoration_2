@@ -32,17 +32,34 @@ from src.restoration.official_lama_adapter import OFFICIAL_LAMA_CHECKPOINT, run_
 
 R011_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r011-repair-ft-s42" / "best_iou.ckpt"
 R012_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r012-manual-repair-ft-s42" / "best_iou.ckpt"
+R013_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r013-gen120-fixed118-local" / "best_val_iou.pth"
 
 MODE_CONFIGS = {
-    "auto_r011": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
-    "auto_r011_union": {"mask_source": "union", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
-    "auto_r011_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
-    "auto_r011_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
-    "auto_r011_union_refined_face_auto": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R011_CHECKPOINT},
+    "auto_r011": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R011_CHECKPOINT, "model_version": "r011"},
+    "auto_r011_union": {"mask_source": "union", "mask_refine": "none", "checkpoint": R011_CHECKPOINT, "model_version": "r011"},
+    "auto_r011_refined": {
+        "mask_source": "dl",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R011_CHECKPOINT,
+        "model_version": "r011",
+    },
+    "auto_r011_union_refined": {
+        "mask_source": "union",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R011_CHECKPOINT,
+        "model_version": "r011",
+    },
+    "auto_r011_union_refined_face_auto": {
+        "mask_source": "union",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R011_CHECKPOINT,
+        "model_version": "r011",
+    },
     "auto_r011_sensitive_low_threshold": {
         "mask_source": "dl",
         "mask_refine": "close_dilate1",
         "checkpoint": R011_CHECKPOINT,
+        "model_version": "r011",
         "threshold": 0.15,
         "fallback_threshold": 0.15,
         "mask_dilate": 0,
@@ -50,11 +67,96 @@ MODE_CONFIGS = {
         "warning": "Recall-sensitive mask may increase false positives.",
         "original_baseline": "auto_r011_union_refined",
     },
-    "auto_r012": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R012_CHECKPOINT},
-    "auto_r012_refined": {"mask_source": "dl", "mask_refine": "repair_v3_conservative", "checkpoint": R012_CHECKPOINT},
-    "auto_r012_union_refined": {"mask_source": "union", "mask_refine": "repair_v3_conservative", "checkpoint": R012_CHECKPOINT},
-    "external": {"mask_source": "external", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
-    "external_face_auto": {"mask_source": "external", "mask_refine": "none", "checkpoint": R011_CHECKPOINT},
+    "auto_r012": {"mask_source": "dl", "mask_refine": "none", "checkpoint": R012_CHECKPOINT, "model_version": "r012"},
+    "auto_r012_refined": {
+        "mask_source": "dl",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R012_CHECKPOINT,
+        "model_version": "r012",
+    },
+    "auto_r012_union_refined": {
+        "mask_source": "union",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R012_CHECKPOINT,
+        "model_version": "r012",
+    },
+    "auto_r013": {
+        "mask_source": "dl",
+        "mask_refine": "none",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.50,
+        "fallback_threshold": 0.40,
+        "experimental": True,
+        "warning": "r013 candidate mode for local recovery; it is not r011.",
+    },
+    "auto_r013_union": {
+        "mask_source": "union",
+        "mask_refine": "none",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.50,
+        "fallback_threshold": 0.40,
+        "experimental": True,
+        "warning": "r013 candidate mode for local recovery; it is not r011.",
+    },
+    "auto_r013_union_refined": {
+        "mask_source": "union",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.50,
+        "fallback_threshold": 0.40,
+        "experimental": True,
+        "warning": "r013 candidate mode for local recovery; it is not r011.",
+    },
+    "auto_r013_union_repair_wide": {
+        "mask_source": "union",
+        "mask_refine": "repair_wide_v1",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.50,
+        "fallback_threshold": 0.40,
+        "experimental": True,
+        "warning": "r013 union repair-wide candidate tuned primarily for demo3 LaMa inpainting.",
+    },
+    "auto_r013_sensitive": {
+        "mask_source": "dl",
+        "mask_refine": "none",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.40,
+        "fallback_threshold": 0.35,
+        "experimental": True,
+        "warning": "r013 sensitive candidate mode for local recovery; it is not r011.",
+    },
+    "auto_r013_sensitive_union": {
+        "mask_source": "union",
+        "mask_refine": "none",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.40,
+        "fallback_threshold": 0.35,
+        "experimental": True,
+        "warning": "r013 sensitive candidate mode for local recovery; it is not r011.",
+    },
+    "auto_r013_sensitive_union_refined": {
+        "mask_source": "union",
+        "mask_refine": "repair_v3_conservative",
+        "checkpoint": R013_CHECKPOINT,
+        "model_version": "r013",
+        "threshold": 0.40,
+        "fallback_threshold": 0.35,
+        "experimental": True,
+        "warning": "r013 sensitive candidate mode for local recovery; it is not r011.",
+    },
+    "external": {"mask_source": "external", "mask_refine": "none", "checkpoint": R011_CHECKPOINT, "model_version": "external"},
+    "external_face_auto": {
+        "mask_source": "external",
+        "mask_refine": "none",
+        "checkpoint": R011_CHECKPOINT,
+        "model_version": "external",
+    },
 }
 SUPPORTED_RUN_DEMO_BACKENDS = {"auto", "simple_lama", "opencv"}
 
@@ -84,6 +186,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codeformer-fidelity", type=float, default=None)
     parser.add_argument("--skip-face-restoration", action="store_true")
     parser.add_argument("--save-all-masks", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-mask-debug", action="store_true")
     return parser.parse_args()
 
 
@@ -96,6 +199,17 @@ def resolve_checkpoint(args: argparse.Namespace, mode_config: dict[str, Any]) ->
     if args.checkpoint:
         return resolve_path(args.checkpoint)
     return Path(mode_config["checkpoint"]).resolve()
+
+
+def checkpoint_missing_message(mode: str, checkpoint_path: Path, mode_config: dict[str, Any]) -> str:
+    model_version = str(mode_config.get("model_version", "unknown"))
+    if model_version == "r011":
+        return (
+            f"Không tìm thấy checkpoint r011 cho mode {mode}: {checkpoint_path}. "
+            "r011 checkpoint đang missing; không dùng r013 để giả mạo r011. "
+            "Hãy khôi phục đúng r011 checkpoint hoặc chọn mode auto_r013/auto_r013_sensitive."
+        )
+    return f"Không tìm thấy checkpoint cho mode {mode}: {checkpoint_path}"
 
 
 def copy_required_outputs(source_dir: Path, target_dir: Path) -> None:
@@ -112,6 +226,12 @@ def copy_required_outputs(source_dir: Path, target_dir: Path) -> None:
         "external_mask.png",
         "final_mask_before_refine.png",
         "final_mask_refined.png",
+        "rejected_cv_by_final.png",
+        "rejected_cv_overlay.png",
+        "kept_cv_by_final.png",
+        "mask_debug_stats.json",
+        "dl_mask.png",
+        "union_before_refine.png",
     ]:
         source = source_dir / filename
         if source.exists():
@@ -272,6 +392,8 @@ def main() -> int:
 
     mode_config = MODE_CONFIGS[args.mode]
     checkpoint_path = resolve_checkpoint(args, mode_config)
+    if not checkpoint_path.exists() and str(mode_config.get("model_version", "unknown")) == "r011":
+        raise FileNotFoundError(checkpoint_missing_message(args.mode, checkpoint_path, mode_config))
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Không tìm thấy checkpoint cho mode {args.mode}: {checkpoint_path}")
 
@@ -329,6 +451,74 @@ def main() -> int:
     run_demo(command)
 
     run_demo_dir = scratch_root / image_path.stem / mask_source
+    if args.save_mask_debug:
+        primary_tag = f"t{effective_threshold:.2f}".replace(".", "p")
+        dl_mask_path = run_demo_dir / f"dl_mask_{primary_tag}.png"
+        cv_mask_path = run_demo_dir / "cv_mask.png"
+        final_mask_path = run_demo_dir / "final_mask.png"
+        union_mask_path = run_demo_dir / "union_mask.png"
+        input_path = run_demo_dir / "input.png"
+
+        dl_mask = cv2.imread(str(dl_mask_path), cv2.IMREAD_GRAYSCALE) if dl_mask_path.exists() else None
+        cv_mask = cv2.imread(str(cv_mask_path), cv2.IMREAD_GRAYSCALE) if cv_mask_path.exists() else None
+        final_mask = cv2.imread(str(final_mask_path), cv2.IMREAD_GRAYSCALE) if final_mask_path.exists() else None
+        union_mask = cv2.imread(str(union_mask_path), cv2.IMREAD_GRAYSCALE) if union_mask_path.exists() else None
+        input_img = cv2.imread(str(input_path)) if input_path.exists() else None
+
+        if final_mask is not None:
+            h, w = final_mask.shape[:2]
+            if dl_mask is None:
+                dl_mask = np.zeros((h, w), dtype=np.uint8)
+            if cv_mask is None:
+                cv_mask = np.zeros((h, w), dtype=np.uint8)
+            if union_mask is None:
+                union_mask = cv2.max(dl_mask, cv_mask)
+
+            rejected_cv = cv2.bitwise_and(cv_mask, cv2.bitwise_not(final_mask))
+            kept_cv = cv2.bitwise_and(cv_mask, final_mask)
+
+            cv2.imwrite(str(run_demo_dir / "rejected_cv_by_final.png"), rejected_cv)
+            cv2.imwrite(str(run_demo_dir / "kept_cv_by_final.png"), kept_cv)
+            cv2.imwrite(str(run_demo_dir / "dl_mask.png"), dl_mask)
+            cv2.imwrite(str(run_demo_dir / "union_before_refine.png"), union_mask)
+
+            if input_img is not None:
+                overlay_img = input_img.copy()
+                color = np.array([0, 0, 255], dtype=np.uint8)
+                mask_bool = rejected_cv > 0
+                overlay_img[mask_bool] = np.clip(overlay_img[mask_bool] * 0.55 + color * 0.45, 0, 255).astype(np.uint8)
+                cv2.imwrite(str(run_demo_dir / "rejected_cv_overlay.png"), overlay_img)
+
+            dl_cnt = np.count_nonzero(dl_mask)
+            cv_cnt = np.count_nonzero(cv_mask)
+            union_cnt = np.count_nonzero(union_mask)
+            final_cnt = np.count_nonzero(final_mask)
+            rej_cnt = np.count_nonzero(rejected_cv)
+            kept_cnt = np.count_nonzero(kept_cv)
+            total_pixels = dl_mask.size
+
+            num_labels_cv, _, _, _ = cv2.connectedComponentsWithStats(cv_mask, connectivity=8)
+            num_labels_final, _, _, _ = cv2.connectedComponentsWithStats(final_mask, connectivity=8)
+
+            stats = {
+                "dl_mask_ratio": float(dl_cnt / total_pixels),
+                "cv_mask_ratio": float(cv_cnt / total_pixels),
+                "union_before_refine_ratio": float(union_cnt / total_pixels),
+                "final_mask_ratio": float(final_cnt / total_pixels),
+                "rejected_cv_ratio": float(rej_cnt / total_pixels),
+                "kept_cv_ratio": float(kept_cnt / total_pixels),
+                "rejected_cv_over_cv_ratio": float(rej_cnt / cv_cnt) if cv_cnt > 0 else 0.0,
+                "final_over_union_ratio": float(final_cnt / union_cnt) if union_cnt > 0 else 0.0,
+                "number_connected_components_cv": int(num_labels_cv - 1),
+                "number_connected_components_final": int(num_labels_final - 1),
+                "mode": args.mode,
+                "checkpoint": str(checkpoint_path),
+                "threshold": effective_threshold
+            }
+
+            with open(run_demo_dir / "mask_debug_stats.json", "w", encoding="utf-8") as f:
+                json.dump(stats, f, ensure_ascii=False, indent=2)
+
     final_dir = output_root / image_path.stem / args.mode
     copy_required_outputs(run_demo_dir, final_dir)
 
@@ -402,6 +592,15 @@ def main() -> int:
         metadata["warning"] = mode_config.get("warning")
     metadata["pipeline_output_dir"] = str(final_dir)
     metadata["checkpoint_used"] = str(checkpoint_path)
+    metadata["segmentation_model_version"] = str(mode_config.get("model_version", "unknown"))
+    metadata["segmentation_checkpoint"] = str(checkpoint_path)
+    metadata["segmentation_threshold"] = float(effective_threshold)
+    metadata["mask_source"] = mask_source
+    metadata["mask_refine"] = mask_refine
+    metadata["cv_mask_used"] = mask_source in ("union", "cv_only")
+    metadata["union_refinement_used"] = mask_refine != "none"
+    metadata["r011_checkpoint_available"] = R011_CHECKPOINT.exists()
+    metadata["r013_checkpoint_available"] = R013_CHECKPOINT.exists()
     metadata["inpainting_backend_requested"] = requested_backend
     metadata["inpainting_backend_actual"] = actual_backend
     metadata["actual_backend"] = actual_backend
@@ -451,6 +650,17 @@ def main() -> int:
     metadata["codeformer_output"] = face_metadata.get("codeformer_output")
     metadata["codeformer_result"] = face_metadata.get("codeformer_result")
     metadata["errors_or_warnings"] = build_errors_or_warnings(metadata, face_metadata)
+
+    mask_debug_stats_path = final_dir / "mask_debug_stats.json"
+    if mask_debug_stats_path.exists():
+        try:
+            stats = json.loads(mask_debug_stats_path.read_text(encoding="utf-8"))
+            for key in ["dl_mask_ratio", "cv_mask_ratio", "union_before_refine_ratio", "final_mask_ratio", "rejected_cv_over_cv_ratio"]:
+                if key in stats:
+                    metadata[key] = stats[key]
+        except Exception:
+            pass
+
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     rebuild_pipeline_comparison_grid(final_dir)
 

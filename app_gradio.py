@@ -23,6 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "blueprint21_final_assets" / "gradio_runs"
 R011_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r011-repair-ft-s42" / "best_iou.ckpt"
 R012_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r012-manual-repair-ft-s42" / "best_iou.ckpt"
+R013_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "segmenter" / "seg-unet-attn-r013-gen120-fixed118-local" / "best_val_iou.pth"
 FINE_TUNED_LAMA_MARKERS = [
     PROJECT_ROOT / "checkpoints" / "lama" / "fine_tuned_lama",
     PROJECT_ROOT / "configs" / "lama_finetuned.yaml",
@@ -35,6 +36,13 @@ MASK_MODE_CHOICES = [
     ("Experimental — r012", "auto_r012"),
     ("Experimental — r012 Refined", "auto_r012_refined"),
     ("Experimental — r012 Union Refined", "auto_r012_union_refined"),
+    ("Recovery candidate - r013", "auto_r013"),
+    ("Recovery candidate - r013 Union", "auto_r013_union"),
+    ("Recovery candidate - r013 Union Refined", "auto_r013_union_refined"),
+    ("Recovery candidate - r013 Union Repair Wide", "auto_r013_union_repair_wide"),
+    ("Recovery candidate - r013 Sensitive", "auto_r013_sensitive"),
+    ("Recovery candidate - r013 Sensitive Union", "auto_r013_sensitive_union"),
+    ("Recovery candidate - r013 Sensitive Union Refined", "auto_r013_sensitive_union_refined"),
     ("External / Oracle Mask", "external"),
 ]
 BACKEND_CHOICES = [
@@ -63,9 +71,49 @@ except ImportError:
 
 def available_mask_modes() -> list[str]:
     modes = ["auto_r011", "auto_r011_refined", "auto_r011_union_refined", "auto_r011_sensitive_low_threshold", "external"]
+    if R013_CHECKPOINT.exists():
+        modes.extend([
+            "auto_r013",
+            "auto_r013_union",
+            "auto_r013_union_refined",
+            "auto_r013_union_repair_wide",
+            "auto_r013_sensitive",
+            "auto_r013_sensitive_union",
+            "auto_r013_sensitive_union_refined",
+        ])
     if R012_CHECKPOINT.exists():
         modes.extend(["auto_r012", "auto_r012_refined", "auto_r012_union_refined"])
     return modes
+
+
+def default_mask_mode() -> str:
+    if not R011_CHECKPOINT.exists() and R013_CHECKPOINT.exists():
+        return "auto_r013_union_refined"
+    return "auto_r011_union_refined"
+
+
+def recovery_notice() -> str:
+    if not R011_CHECKPOINT.exists() and R013_CHECKPOINT.exists():
+        return "⚠️ r011 checkpoint missing; using r013 hybrid union-refined candidate mode."
+    return ""
+
+
+def checkpoint_for_mask_mode(mode: str) -> Path:
+    if mode.startswith("auto_r012"):
+        return R012_CHECKPOINT
+    if mode.startswith("auto_r013"):
+        return R013_CHECKPOINT
+    return R011_CHECKPOINT
+
+
+def segmentation_version_for_mode(mode: str) -> str:
+    if mode.startswith("auto_r012"):
+        return "r012"
+    if mode.startswith("auto_r013"):
+        return "r013"
+    if mode.startswith("external"):
+        return "external"
+    return "r011"
 
 
 def available_backends() -> list[str]:
@@ -81,15 +129,16 @@ def get_system_readiness() -> dict:
     opencv_status = check_opencv_available()
     codeformer_available = CODEFORMER_REPO.exists()
     if simple_lama_status.get("available"):
-        fallback_recommendation = "auto_r011_union_refined + simple_lama"
+        fallback_recommendation = f"{default_mask_mode()} + simple_lama"
     elif official_lama_status.get("available"):
-        fallback_recommendation = "auto_r011_union_refined + official_lama"
+        fallback_recommendation = f"{default_mask_mode()} + official_lama"
     else:
-        fallback_recommendation = "auto_r011_union_refined + opencv"
+        fallback_recommendation = f"{default_mask_mode()} + opencv"
     return {
         "segmentation": {
             "r011": "available" if R011_CHECKPOINT.exists() else "missing",
             "r012": "available" if R012_CHECKPOINT.exists() else "missing",
+            "r013": "available" if R013_CHECKPOINT.exists() else "missing",
             "sensitive_mode": "available",
         },
         "inpainting": {
@@ -117,7 +166,7 @@ def get_system_readiness() -> dict:
             "CodeFormer": "available" if codeformer_available else "unavailable",
         },
         "current_recommendation": {
-            "demo3": "auto_r011_sensitive_low_threshold + official_lama + CodeFormer 0.7",
+            "demo3": f"{default_mask_mode()} + official_lama + CodeFormer 0.7",
             "fallback": fallback_recommendation,
         },
     }
@@ -129,6 +178,7 @@ def format_system_readiness() -> str:
         "Segmentation:\n"
         f"  r011: {readiness['segmentation']['r011']}\n"
         f"  r012: {readiness['segmentation']['r012']}\n"
+        f"  r013: {readiness['segmentation']['r013']}\n"
         f"  sensitive mode: {readiness['segmentation']['sensitive_mode']}\n\n"
         "Inpainting:\n"
         f"  simple_lama: {readiness['inpainting']['simple_lama']} — {readiness['inpainting']['simple_lama_reason']}\n"
@@ -168,11 +218,21 @@ def _download_update(visible: bool, value: str | None = None):
     return value if visible else None
 
 
-def _empty_response(message: str, metadata_path: Path | None = None, warnings: list[str] | None = None) -> tuple:
+def _empty_response(
+    message: str,
+    metadata_path: Path | None = None,
+    warnings: list[str] | None = None,
+    mode: str | None = None,
+) -> tuple:
     payload = {
         "success": False,
         "input_path": None,
-        "mask_mode": None,
+        "mask_mode": mode,
+        "segmentation_model_version": segmentation_version_for_mode(mode) if mode else None,
+        "segmentation_checkpoint": str(checkpoint_for_mask_mode(mode)) if mode else None,
+        "segmentation_threshold": None,
+        "r011_checkpoint_available": R011_CHECKPOINT.exists(),
+        "r013_checkpoint_available": R013_CHECKPOINT.exists(),
         "inpainting_backend_requested": None,
         "inpainting_backend_actual": None,
         "face_restoration_requested": False,
@@ -215,6 +275,11 @@ def _normalize_metadata(
     output["success"] = bool(success)
     output["input_path"] = str(input_path)
     output["mask_mode"] = mode
+    output["segmentation_model_version"] = output.get("segmentation_model_version") or segmentation_version_for_mode(mode)
+    output["segmentation_checkpoint"] = output.get("segmentation_checkpoint") or str(checkpoint_for_mask_mode(mode))
+    output["segmentation_threshold"] = output.get("segmentation_threshold")
+    output["r011_checkpoint_available"] = R011_CHECKPOINT.exists()
+    output["r013_checkpoint_available"] = R013_CHECKPOINT.exists()
     output["inpainting_backend_requested"] = backend
     output["inpainting_backend_actual"] = output.get("inpainting_backend_actual") or output.get("actual_backend")
     output["fallback_applied"] = bool(output.get("fallback_applied", output["inpainting_backend_actual"] != backend))
@@ -281,9 +346,17 @@ def run_restoration(
     warnings: list[str] = []
     errors: list[str] = []
     if image is None:
-        return _empty_response("Cần chọn ảnh đầu vào.", error_metadata_path)
+        return _empty_response("Cần chọn ảnh đầu vào.", error_metadata_path, mode=mode)
     if progress is not None:
         progress(0.05, desc="loading image")
+    if mode.startswith("auto_r011") and not R011_CHECKPOINT.exists():
+        return _empty_response(
+            "r011 checkpoint missing; không dùng r013 để giả mạo r011. Chọn auto_r013 hoặc khôi phục đúng r011 checkpoint.",
+            error_metadata_path,
+            mode=mode,
+        )
+    if mode.startswith("auto_r013") and not R013_CHECKPOINT.exists():
+        return _empty_response("Checkpoint r013 chưa tồn tại, mode r013 bị skip an toàn.", error_metadata_path, mode=mode)
     if mode.startswith("auto_r012") and not R012_CHECKPOINT.exists():
         return _empty_response("Checkpoint r012 chưa tồn tại, mode r012 bị skip an toàn.", error_metadata_path)
     if backend == "fine_tuned_lama" and not any(path.exists() for path in FINE_TUNED_LAMA_MARKERS):
@@ -298,12 +371,16 @@ def run_restoration(
     if backend == "official_lama":
         warnings.append("official_lama CPU local có thể chậm.")
 
+    notice = recovery_notice()
+    if notice and mode.startswith("auto_r013"):
+        warnings.append(notice)
+
     image_path = input_dir / f"{run_id}.png"
     _write_rgb(image_path, image)
     if progress is not None:
         progress(0.20, desc="generating mask")
 
-    checkpoint = R012_CHECKPOINT if mode.startswith("auto_r012") else R011_CHECKPOINT
+    checkpoint = checkpoint_for_mask_mode(mode)
     command = [
         sys.executable,
         "scripts\\run_restoration_pipeline.py",
@@ -393,8 +470,9 @@ def build_demo():
                 with gr.Accordion("Advanced settings", open=False):
                     external_mask = gr.Image(label="External / oracle mask PNG", type="numpy")
                 readiness = gr.Textbox(label="System Readiness", value=format_system_readiness(), lines=16, interactive=False)
+                gr.Markdown(recovery_notice())
             with gr.Column():
-                mode = gr.Dropdown(label="Mask mode", choices=MASK_MODE_CHOICES, value="auto_r011_union_refined")
+                mode = gr.Dropdown(label="Mask mode", choices=MASK_MODE_CHOICES, value=default_mask_mode())
                 backend = gr.Dropdown(label="Inpainting backend", choices=BACKEND_CHOICES, value="simple_lama")
                 face_mode = gr.Dropdown(label="Face restoration", choices=["off", "auto", "codeformer_if_available"], value="off")
                 codeformer_fidelity = gr.Slider(
